@@ -1,0 +1,32 @@
+from pydantic import BaseModel, EmailStr, Field, ConfigDict
+from uuid import UUID
+from app.models import UserRole
+
+
+class RegisterRequest(BaseModel):
+    full_name: str = Field(min_length=2, max_length=160)
+    email: EmailStr
+    password: str = Field(min_length=12, max_length=128)
+    role: UserRole = UserRole.STUDENT
+    organization_name: str | None = Field(default=None, min_length=2, max_length=200)
+
+
+class LoginRequest(BaseModel):
+    email: EmailStr
+    password: str = Field(min_length=1, max_length=128)
+
+
+class UserResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: UUID
+    email: EmailStr
+    full_name: str
+    role: UserRole
+    status: str
+
+
+class TokenResponse(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+    expires_in: int
+    user: UserResponse
