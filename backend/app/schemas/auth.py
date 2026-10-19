@@ -23,6 +23,7 @@ class UserResponse(BaseModel):
     full_name: str
     role: UserRole
     status: str
+    must_change_password: bool = False
 
 
 class TokenResponse(BaseModel):
@@ -30,3 +31,8 @@ class TokenResponse(BaseModel):
     token_type: str = "bearer"
     expires_in: int
     user: UserResponse
+
+
+class ChangePasswordRequest(BaseModel):
+    current_password: str = Field(min_length=1, max_length=128)
+    new_password: str = Field(min_length=12, max_length=128)
