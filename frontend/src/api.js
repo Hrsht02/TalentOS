@@ -4,13 +4,32 @@ const defaultApiBase = import.meta.env.PROD
   : "http://localhost:8000/api/v1";
 const API_BASE = (configuredApiBase || defaultApiBase).replace(/\/$/, "");
 
+function readableError(detail, fallback) {
+  if (typeof detail === "string") return detail;
+  if (Array.isArray(detail)) {
+    return detail.map((item) => {
+      if (typeof item === "string") return item;
+      const location = Array.isArray(item?.loc) ? item.loc.filter((part) => part !== "body").join(" → ") : "";
+      const message = item?.msg || item?.message || "Invalid value";
+      return location ? `${location}: ${message}` : message;
+    }).join("; ") || fallback;
+  }
+  if (detail && typeof detail === "object") {
+    return detail.message || detail.msg || fallback;
+  }
+  return fallback;
+}
+
 export async function apiRequest(path, options = {}) {
   const token = localStorage.getItem("talentos_access_token");
   const headers = { "Content-Type": "application/json", ...(options.headers || {}) };
   if (token) headers.Authorization = `Bearer ${token}`;
   const response = await fetch(`${API_BASE}${path}`, { ...options, headers });
   const payload = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(payload.detail || payload.message || `Request failed (${response.status})`);
+  if (!response.ok) {
+    const fallback = `Request failed (${response.status})`;
+    throw new Error(readableError(payload.detail ?? payload.message, fallback));
+  }
   return payload;
 }
 
