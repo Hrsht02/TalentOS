@@ -1,5 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy import text
+from app.db.session import engine
 from app.core.config import settings
 from app.api.auth import router as auth_router
 from app.api.admin import router as admin_router
@@ -32,5 +34,7 @@ async def health() -> dict[str, str]:
 
 @app.get("/ready", tags=["system"])
 async def ready() -> dict[str, str]:
-    # Database and Redis checks will be added with the API/worker phases.
+    # Fail readiness if PostgreSQL is unreachable.
+    async with engine.connect() as connection:
+        await connection.execute(text("SELECT 1"))
     return {"status": "ready", "service": "talentos-api"}
