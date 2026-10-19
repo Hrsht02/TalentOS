@@ -8,6 +8,7 @@ from app.api.admin import router as admin_router
 from app.api.jobs import router as jobs_router
 from app.api.profile import router as profile_router
 from app.api.assessments import router as assessments_router
+from app.api.companies import router as companies_router
 
 app = FastAPI(
     title=settings.app_name,
@@ -31,6 +32,7 @@ app.include_router(admin_router, prefix=settings.api_v1_prefix)
 app.include_router(jobs_router, prefix=settings.api_v1_prefix)
 app.include_router(profile_router, prefix=settings.api_v1_prefix)
 app.include_router(assessments_router, prefix=settings.api_v1_prefix)
+app.include_router(companies_router, prefix=settings.api_v1_prefix)
 
 
 @app.get("/health", tags=["system"])
