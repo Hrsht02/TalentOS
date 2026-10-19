@@ -20,6 +20,17 @@ from app.schemas.assessments import (
 router = APIRouter(prefix="/assessments", tags=["assessments"])
 
 
+def queue_ranking(job_id: UUID) -> None:
+    try:
+        from app.worker import celery_app
+        celery_app.send_task("app.tasks.rank_job_applicants", args=[str(job_id)])
+    except Exception as exc:
+        import logging
+        logging.getLogger(__name__).warning(
+            "Ranking task could not be queued job_id=%s error_type=%s", job_id, type(exc).__name__
+        )
+
+
 async def company_for_user(db: AsyncSession, user: User) -> UUID:
     result = await db.scalar(select(CompanyMember.company_id).where(
         CompanyMember.user_id == user.id, CompanyMember.active.is_(True)
@@ -396,6 +407,7 @@ async def submit_aptitude_assessment(invite_id: UUID, payload: AssessmentSubmitR
     attempt.result_summary = aptitude_result
     invite.status = AssessmentStatus.COMPLETED if invite.attempts_used >= assessment.max_attempts else AssessmentStatus.SUBMITTED
     await db.commit()
+    queue_ranking(assessment.job_id)
     return {"status": "submitted", "attempt_id": str(attempt.id), "score": score, "max_score": 100,
             "correct": correct, "answered": answered, "total_questions": len(questions)}
 
@@ -565,5 +577,6 @@ async def finish_assessment(
     attempt.status, attempt.submitted_at = "SUBMITTED", now
     invite.status = AssessmentStatus.COMPLETED if invite.attempts_used >= assessment.max_attempts else AssessmentStatus.SUBMITTED
     await db.commit()
+    queue_ranking(assessment.job_id)
     return {"status": "submitted", "attempt_id": str(attempt.id), "score": overall,
             "max_score": 100, "result_summary": summary}
