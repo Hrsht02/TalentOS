@@ -32,7 +32,7 @@ def match_candidates(self, job_id: str) -> dict[str, object]:
     import asyncio
     import uuid
     from sqlalchemy import select
-    from app.db.session import AsyncSessionLocal
+    from app.db.session import AsyncSessionLocal, engine
     from app.models import Job, JobStatus, Match, Student, StudentProject, StudentSkill
 
     async def run():
@@ -106,3 +106,7 @@ def match_candidates(self, job_id: str) -> dict[str, object]:
     except Exception as exc:
         logger.warning("Candidate matching failed type=%s", type(exc).__name__)
         raise self.retry(exc=exc)
+    finally:
+        # Celery is synchronous; each asyncio.run creates a fresh event loop.
+        # Dispose pooled async connections so they are not reused across loops.
+        asyncio.run(engine.dispose())
