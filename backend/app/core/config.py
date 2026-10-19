@@ -32,7 +32,7 @@ class Settings(BaseSettings):
     gemini_model: str = "gemini-2.5-flash"
     gemini_model_2: str = "gemini-2.5-flash"
     xai_api_key: str | None = None
-    grok_api_key: str | None = None  # Alias for deployments that name the xAI key GROK_API_KEY
+    grok_api_key: str | None = None
     xai_model: str = "grok-3-mini"
     ai_request_timeout_seconds: float = 20.0
     ai_max_retries_per_provider: int = 1
@@ -47,27 +47,37 @@ class Settings(BaseSettings):
         if not isinstance(value, str):
             return value
 
+        # Use SQLAlchemy's asyncpg dialect. Neon URLs are commonly copied in
+        # libpq format (postgresql://...?...sslmode=require&channel_binding=require).
         if value.startswith("postgres://"):
             value = value.replace("postgres://", "postgresql+asyncpg://", 1)
         elif value.startswith("postgresql://"):
             value = value.replace("postgresql://", "postgresql+asyncpg://", 1)
 
-        # Neon commonly supplies sslmode=require, which is a libpq option.
-        # asyncpg expects the equivalent URL option to be named ssl.
-        if value.startswith("postgresql+asyncpg://"):
-            parts = urlsplit(value)
-            query = [
-                (key, "require" if key == "sslmode" and val == "require" else val)
-                for key, val in parse_qsl(parts.query, keep_blank_values=True)
-                if key != "sslmode"
-            ]
-            original_query = parse_qsl(parts.query, keep_blank_values=True)
-            if any(key == "sslmode" for key, _ in original_query):
-                sslmode = next(val for key, val in original_query if key == "sslmode")
-                if not any(key == "ssl" for key, _ in query):
-                    query.append(("ssl", "require" if sslmode == "require" else sslmode))
-            value = urlunsplit((parts.scheme, parts.netloc, parts.path, urlencode(query), parts.fragment))
-        return value
+        if not value.startswith("postgresql+asyncpg://"):
+            return value
+
+        parts = urlsplit(value)
+        original_query = parse_qsl(parts.query, keep_blank_values=True)
+        normalized_query: list[tuple[str, str]] = []
+        has_ssl = False
+
+        for key, val in original_query:
+            # libpq-only options are not valid asyncpg URL parameters.
+            if key == "channel_binding":
+                continue
+            if key == "sslmode":
+                if not has_ssl:
+                    normalized_query.append(("ssl", "require" if val == "require" else val))
+                    has_ssl = True
+                continue
+            if key == "ssl":
+                has_ssl = True
+            normalized_query.append((key, val))
+
+        return urlunsplit(
+            (parts.scheme, parts.netloc, parts.path, urlencode(normalized_query), parts.fragment)
+        )
 
     @model_validator(mode="after")
     def validate_production_settings(self):
