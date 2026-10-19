@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { Activity, ArrowRight, ArrowUpRight, Bell, BriefcaseBusiness, Building2, CheckCircle2, ChevronDown, CircleHelp, Command, FileText, GraduationCap, LayoutDashboard, LogOut, Search, ShieldCheck, Sparkles, Users, Zap } from "lucide-react";
+import { Activity, ArrowRight, ArrowUpRight, Bell, BriefcaseBusiness, Building2, CheckCircle2, ChevronDown, CircleHelp, Command, FileText, GraduationCap, LayoutDashboard, LogOut, Search, ShieldCheck, Sparkles, Users, Zap, UserRound, Plus, Trash2, Save } from "lucide-react";
 import { apiRequest, clearSession, saveSession } from "./api";
 
 const initialUser = () => {
@@ -85,6 +85,59 @@ function JobCenter({ user }) {
   </div>;
 }
 
+function ProfileCenter() {
+  const [profile, setProfile] = useState(null);
+  const [form, setForm] = useState({});
+  const [skill, setSkill] = useState({ skill: "", proficiency: "Intermediate", years_experience: "" });
+  const [project, setProject] = useState({ name: "", description: "", repository_url: "", technologies: "" });
+  const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
+  const [busy, setBusy] = useState(false);
+  async function load() {
+    try { const data = await apiRequest("/student/profile"); setProfile(data); setForm({
+      headline: data.headline || "", phone: data.phone || "", location: data.location || "",
+      graduation_year: data.graduation_year || "", degree: data.degree || "", branch: data.branch || "",
+      cgpa: data.cgpa ?? "", backlogs: data.backlogs ?? "", expected_salary_min: data.expected_salary_min ?? "",
+      expected_salary_max: data.expected_salary_max ?? ""
+    }); } catch(e) { setError(e.message); }
+  }
+  useEffect(()=>{ load(); }, []);
+  async function saveProfile(event) {
+    event.preventDefault(); setBusy(true); setError(""); setNotice("");
+    const body = { ...form };
+    ["graduation_year","cgpa","backlogs","expected_salary_min","expected_salary_max"].forEach(k => body[k] === "" ? body[k] = null : body[k] = Number(body[k]));
+    try { await apiRequest("/student/profile", { method:"PATCH", body:JSON.stringify(body) }); setNotice("Profile saved."); await load(); }
+    catch(e) { setError(e.message); } finally { setBusy(false); }
+  }
+  async function addSkill(event) {
+    event.preventDefault(); setError(""); setNotice("");
+    try { await apiRequest("/student/profile/skills", { method:"POST", body:JSON.stringify({ ...skill, years_experience: skill.years_experience === "" ? null : Number(skill.years_experience) }) }); setSkill({skill:"",proficiency:"Intermediate",years_experience:""}); setNotice("Skill saved."); await load(); }
+    catch(e) { setError(e.message); }
+  }
+  async function addProject(event) {
+    event.preventDefault(); setError(""); setNotice("");
+    try { await apiRequest("/student/profile/projects", { method:"POST", body:JSON.stringify({ ...project, technologies:project.technologies.split(",").map(x=>x.trim()).filter(Boolean) }) }); setProject({name:"",description:"",repository_url:"",technologies:""}); setNotice("Project saved."); await load(); }
+    catch(e) { setError(e.message); }
+  }
+  async function removeItem(path) {
+    setError(""); setNotice("");
+    try { await apiRequest(path, { method:"DELETE" }); setNotice("Item removed."); await load(); } catch(e) { setError(e.message); }
+  }
+  const change = (key,value) => setForm(old=>({...old,[key]:value}));
+  if (!profile && !error) return <div className="panel">Loading your profile…</div>;
+  return <div className="profile-view">
+    <div className="welcome-row"><div><p className="eyebrow">YOUR PROFESSIONAL STORY</p><h1>Student profile<span className="heading-period">.</span></h1><p className="muted">Keep your skills and projects up to date so future matching can use accurate information.</p></div><div className="profile-completion"><b>{profile?.profile_completion ?? 0}%</b><span>profile strength</span><div><i style={{width:`${profile?.profile_completion ?? 0}%`}}/></div></div></div>
+    {error && <div className="error-message jobs-message">{error}</div>}{notice && <div className="success-message jobs-message">{notice}</div>}
+    {profile && <>
+      <form className="panel profile-form" onSubmit={saveProfile}><div className="panel-heading"><div><h2>Basic information</h2><p>{profile.full_name} · {profile.email}</p></div><button className="primary-button" disabled={busy}><Save size={14}/>{busy ? "Saving…" : "Save profile"}</button></div>
+      <label className="wide-label">Professional headline<input value={form.headline} onChange={e=>change("headline",e.target.value)} placeholder="e.g. Computer Science student interested in AI"/></label>
+      <div className="form-grid"><label>Phone<input value={form.phone} onChange={e=>change("phone",e.target.value)} placeholder="Phone number"/></label><label>Location<input value={form.location} onChange={e=>change("location",e.target.value)} placeholder="City, country or remote"/></label><label>Degree<input value={form.degree} onChange={e=>change("degree",e.target.value)} placeholder="Degree"/></label><label>Branch / specialization<input value={form.branch} onChange={e=>change("branch",e.target.value)} placeholder="Computer Science, etc."/></label><label>Graduation year<input type="number" min="1950" max="2100" value={form.graduation_year} onChange={e=>change("graduation_year",e.target.value)} placeholder="2027"/></label><label>CGPA (out of 10)<input type="number" min="0" max="10" step=".01" value={form.cgpa} onChange={e=>change("cgpa",e.target.value)} placeholder="8.5"/></label><label>Backlogs<input type="number" min="0" value={form.backlogs} onChange={e=>change("backlogs",e.target.value)} placeholder="0"/></label><label>Minimum expected salary<input type="number" min="0" value={form.expected_salary_min} onChange={e=>change("expected_salary_min",e.target.value)} placeholder="Optional"/></label></div></form>
+      <div className="profile-columns"><section className="panel"><div className="panel-heading"><div><h2>Skills</h2><p>Skills can later be matched to job requirements.</p></div><span className="tiny-tag">{profile.skills.length} ADDED</span></div><form className="inline-add-form" onSubmit={addSkill}><input required value={skill.skill} onChange={e=>setSkill({...skill,skill:e.target.value})} placeholder="Add a skill e.g. Python"/><select value={skill.proficiency} onChange={e=>setSkill({...skill,proficiency:e.target.value})}><option>Beginner</option><option>Intermediate</option><option>Advanced</option><option>Expert</option></select><button className="primary-button" aria-label="Add skill"><Plus size={15}/></button></form><div className="skill-list">{profile.skills.map(item=><div className="skill-chip" key={item.id}><span><b>{item.skill}</b><small>{item.proficiency || "Level not set"}</small></span><button aria-label={`Remove ${item.skill}`} onClick={()=>removeItem(`/student/profile/skills/${item.id}`)}><Trash2 size={14}/></button></div>)}{profile.skills.length===0 && <p className="profile-empty">Add your first skill to improve your profile.</p>}</div></section>
+      <section className="panel"><div className="panel-heading"><div><h2>Projects</h2><p>Show the work you've built.</p></div><span className="tiny-tag">{profile.projects.length} ADDED</span></div><form className="project-add-form" onSubmit={addProject}><input required value={project.name} onChange={e=>setProject({...project,name:e.target.value})} placeholder="Project name"/><textarea rows="2" value={project.description} onChange={e=>setProject({...project,description:e.target.value})} placeholder="What did you build?"/><input value={project.repository_url} onChange={e=>setProject({...project,repository_url:e.target.value})} placeholder="Repository URL (optional)"/><input value={project.technologies} onChange={e=>setProject({...project,technologies:e.target.value})} placeholder="Technologies, comma separated"/><button className="primary-button"><Plus size={14}/> Add project</button></form><div className="project-list">{profile.projects.map(item=><div className="project-item" key={item.id}><div><b>{item.name}</b><p>{item.description || "No description added"}</p>{item.technologies?.length>0 && <small>{item.technologies.join(" · ")}</small>}</div><button aria-label={`Remove ${item.name}`} onClick={()=>removeItem(`/student/profile/projects/${item.id}`)}><Trash2 size={14}/></button></div>)}</div></section></div>
+    </>}
+  </div>;
+}
+
 function Dashboard({ user, onLogout }) {
   const [stats, setStats] = useState(null);
   const [status, setStatus] = useState("");
@@ -110,6 +163,7 @@ function Dashboard({ user, onLogout }) {
       <nav className="side-nav">
         <p className="nav-caption">OVERVIEW</p><button className={`nav-item ${view === "dashboard" ? "active" : ""}`} onClick={()=>setView("dashboard")}><LayoutDashboard size={17}/> Dashboard</button>
         <button className={`nav-item ${view === "jobs" ? "active" : ""}`} onClick={()=>setView("jobs")}><BriefcaseBusiness size={17}/> {student ? "Explore jobs" : "Job openings"}</button>
+        {student && <button className={`nav-item ${view === "profile" ? "active" : ""}`} onClick={()=>setView("profile")}><UserRound size={17}/> My profile</button>}
         <a className="nav-item"><Users size={17}/> {student ? "My applications" : "Candidates"} <span className="nav-soon">Soon</span></a>
         <a className="nav-item"><Sparkles size={17}/> AI matching <span className="nav-soon">Soon</span></a>
         <p className="nav-caption nav-caption-spaced">MANAGE</p>
@@ -122,7 +176,7 @@ function Dashboard({ user, onLogout }) {
     <main className="main-area">
       <header className="topbar"><div className="breadcrumbs">Workspace <span>/</span> <b>{view === "jobs" ? "Job openings" : "Dashboard"}</b></div><div className="top-actions"><button className="icon-button" aria-label="Search"><Search size={17}/></button><button className="icon-button" aria-label="Notifications"><Bell size={17}/></button><div className="top-avatar">{(user?.full_name || "T").slice(0,1).toUpperCase()}</div></div></header>
       <div className="page-content">
-        {view === "jobs" ? <JobCenter user={user}/> : <>
+        {view === "jobs" ? <JobCenter user={user}/> : view === "profile" && student ? <ProfileCenter/> : <>
         <div className="welcome-row"><div><p className="eyebrow">MONDAY · YOUR WORKSPACE</p><h1>{title}<span className="heading-period">.</span></h1><p className="muted">Hi {user?.full_name?.split(" ")[0] || "there"}, here's what's happening with your workspace.</p></div><div className="date-pill"><Activity size={15}/> Live workspace</div></div>
         <div className="notice-banner"><div className="notice-icon"><Sparkles size={19}/></div><div><b>Your recruitment copilot is being prepared</b><p>TalentOS is designed to handle repetitive recruiting tasks and explain its recommendations. More workflow modules are coming online in phases.</p></div><span className="notice-status"><span/> Foundation</span></div>
         <div className="section-heading"><div><h2>Workspace snapshot</h2><p>Key information at a glance</p></div><button className="secondary-button" onClick={()=>window.location.reload()}>Refresh <Activity size={14}/></button></div>
