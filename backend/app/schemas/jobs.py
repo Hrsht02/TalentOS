@@ -20,6 +20,7 @@ class JobResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: UUID
     company_id: UUID
+    company_name: str | None = None
     title: str
     description: str
     location: str | None
