@@ -370,6 +370,8 @@ async def submit_aptitude_assessment(invite_id: UUID, payload: AssessmentSubmitR
     aptitude_result = {"score": score, "correct": correct, "answered": answered,
                        "total": len(questions), "raw_score": round(raw, 2),
                        "raw_max_score": round(max_marks, 2)}
+    if assessment.assessment_type == "MIXED" and (attempt.result_summary or {}).get("aptitude"):
+        raise HTTPException(status_code=409, detail="The aptitude section has already been submitted")
     if assessment.assessment_type == "MIXED":
         # Keep the attempt open so the candidate can also submit its coding section.
         attempt.result_summary = {**(attempt.result_summary or {}), "aptitude": aptitude_result}
@@ -522,11 +524,14 @@ async def finish_assessment(
     missing = [str(qid) for qid in coding_ids if qid not in latest]
     pending = [str(qid) for qid in coding_ids if qid in latest and (
         latest[qid][0].status.value in {"QUEUED", "RUNNING"} or latest[qid][1] is None
-    )]
+    ) and latest[qid][0].status.value != "FAILED"]
+    failed = [str(qid) for qid in coding_ids if qid in latest and latest[qid][0].status.value == "FAILED"]
     if missing:
         raise HTTPException(status_code=409, detail="Submit code for every coding question before finishing")
     if pending:
         raise HTTPException(status_code=409, detail="Some code submissions are still being evaluated; check again shortly")
+    if failed:
+        raise HTTPException(status_code=409, detail="A coding submission failed to evaluate. Submit that question again with a new Idempotency-Key.")
     coding_scores = [float(latest[qid][1].score) for qid in coding_ids]
     coding_score = round(sum(coding_scores) / len(coding_scores), 2)
     summary = {**(attempt.result_summary or {}), "coding": {
