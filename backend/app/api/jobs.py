@@ -348,6 +348,7 @@ async def get_job_ranking(
             "graduation_year": student.graduation_year,
             "application_status": application.status.value,
             "score": score.total_score,
+            "eligible": bool((score.calculated_from or {}).get("eligible", True)),
             "score_explanation": score.explanation,
             "score_breakdown": [{
                 "criterion": item.criterion, "score": item.raw_score,
