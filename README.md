@@ -16,7 +16,7 @@ Autonomous AI-powered recruitment platform connecting students, companies, and r
 
 Phase 0: Architecture and requirements completed.
 Phase 1: Initial database models and Alembic migration committed.
-Phase 2: Initial JWT login/registration, admin overview, and temporary admin password change implemented.
+Phase 2: JWT login/registration, admin overview, and temporary admin password change implemented.
 Phase 3: Initial published job listing, employer draft/publish workflow, student applications, and student profile/skills/projects APIs implemented.
 Frontend foundation: Login/register, responsive dashboards, job management, student profile editor, and Vercel SPA routing committed.
 AI foundation: Gemini key 1 -> Gemini key 2 -> xAI Grok failover router and Celery task entrypoints committed.
@@ -93,3 +93,43 @@ AI produces recommendations and evidence-based explanations. It must not automat
 7. Add a separate Render background worker with start command `celery -A app.worker.celery_app worker --loglevel=info` when using queued AI tasks.
 
 Do not commit secrets. Before production, add email verification, refresh-token rotation, rate limiting, tenant-isolation tests, database backups, and monitoring. The repository is not yet production-ready.
+
+ 
+## Assessment workflows
+
+Employer assessment studio endpoints:
+- `POST /api/v1/assessments/questions/aptitude` — create a company-owned aptitude question.
+- `GET /api/v1/assessments/questions/aptitude` — list platform and company aptitude questions without answer keys.
+- `POST /api/v1/assessments/questions/coding` — create a company-owned coding question.
+- `GET /api/v1/assessments/questions/coding` — list available coding questions.
+- `POST /api/v1/assessments` — create an aptitude, coding, or mixed assessment for a job.
+- `GET /api/v1/assessments/job/{job_id}` — list assessments for an employer-owned job.
+- `POST /api/v1/assessments/{assessment_id}/invite` — invite selected applications.
+
+Student assessment endpoints:
+- `GET /api/v1/assessments/my-invites` — list invitations.
+- `GET /api/v1/assessments/invites/{invite_id}` — view question statements and instructions without answer keys.
+- `POST /api/v1/assessments/invites/{invite_id}/start` — start or resume an attempt.
+- `POST /api/v1/assessments/invites/{invite_id}/submit` — submit aptitude answers.
+- `POST /api/v1/assessments/invites/{invite_id}/coding-submissions` — queue a code submission.
+- `GET /api/v1/assessments/coding-submissions/{submission_id}` — check coding evaluation status.
+- `POST /api/v1/assessments/invites/{invite_id}/finish` — finalize coding or mixed assessment.
+
+The frontend Assessment Studio is available to company HR users. Students can view assigned assessments, submit aptitude answers, and submit code for sandbox evaluation.
+
+### Seed the platform question bank
+
+After applying migrations and setting `DATABASE_URL`, run:
+
+```bash
+cd backend
+python -m app.scripts.seed_question_bank
+```
+
+The script is idempotent and seeds five platform aptitude questions plus three coding questions and their hidden test cases. Company-owned questions are kept separate from the shared platform bank.
+
+### Isolated coding evaluation
+
+Coding submissions require a separately hosted Judge0-compatible service. Configure `JUDGE0_API_URL` and, if needed, `JUDGE0_API_KEY` in Render. TalentOS never runs candidate source code in the FastAPI process. The worker queues the source to the configured judge and stores aggregate scores and verdicts. Do not enable coding assessments in production until the judge endpoint, language IDs, resource limits, and test cases have been validated.
+
+The initial language mapping is Python 3 (Judge0 ID 71), C++ (54), Java (62), and JavaScript (63). Confirm these IDs against the specific Judge0 instance before production use.
