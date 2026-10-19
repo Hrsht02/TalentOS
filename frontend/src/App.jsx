@@ -33,8 +33,9 @@ function AuthPanel({ mode, onSuccess, onMode }) {
       {isRegister && <label>Full name<input required minLength="2" value={form.full_name} onChange={(e)=>change("full_name",e.target.value)} placeholder="Your full name"/></label>}
       <label>Email address<input required type="email" value={form.email} onChange={(e)=>change("email",e.target.value)} placeholder="you@example.com"/></label>
       <label>Password<input required minLength={isRegister ? 12 : 1} type="password" value={form.password} onChange={(e)=>change("password",e.target.value)} placeholder={isRegister ? "At least 12 characters" : "Your password"}/></label>
-      {isRegister && <><label>I'm joining as<select value={form.role} onChange={(e)=>change("role",e.target.value)}><option value="STUDENT">Student / Candidate</option><option value="COMPANY_HR">Company / Employer</option><option value="AGENCY_MEMBER">Recruitment agency</option></select></label>
-      {form.role !== "STUDENT" && <label>Organization name<input required value={form.organization_name} onChange={(e)=>change("organization_name",e.target.value)} placeholder="Company or agency name"/></label>}</>}
+      {isRegister && <><label>I'm joining as<select value={form.role} onChange={(e)=>change("role",e.target.value)}><option value="STUDENT">Student / Candidate</option><option value="COMPANY_HR">Company HR / Recruiter</option><option value="AGENCY_MEMBER">Recruitment agency</option></select></label>
+      {form.role === "AGENCY_MEMBER" && <label>Agency name<input required value={form.organization_name} onChange={(e)=>change("organization_name",e.target.value)} placeholder="Agency name"/></label>}
+      {form.role === "COMPANY_HR" && <p className="muted">Company profiles are managed by TalentOS. After creating your account, request to join your existing company; its owner will approve or reject your request.</p>}</>}
       {error && <div className="error-message">{error}</div>}
       <button className="primary-button full-button" disabled={busy}>{busy ? "Please wait…" : isRegister ? "Create account" : "Sign in"} <ArrowRight size={16}/></button>
     </form>
@@ -169,6 +170,106 @@ function ProfileCenter() {
   </div>;
 }
 
+
+function CompanyCenter({ user, onGoJobs }) {
+  const [membership, setMembership] = useState(null);
+  const [companies, setCompanies] = useState([]);
+  const [members, setMembers] = useState([]);
+  const [requests, setRequests] = useState([]);
+  const [selectedCompany, setSelectedCompany] = useState("");
+  const [joinMessage, setJoinMessage] = useState("");
+  const [hrForm, setHrForm] = useState({full_name:"",email:"",temporary_password:"",sub_role:"HR"});
+  const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
+  const [busy, setBusy] = useState(false);
+  async function load() {
+    setError("");
+    try {
+      const [m, directory] = await Promise.all([
+        apiRequest("/companies/my-membership"),
+        apiRequest("/companies/directory")
+      ]);
+      setMembership(m); setCompanies(directory);
+      if (!selectedCompany && directory.length) setSelectedCompany(directory[0].id);
+      if (m.has_company && m.can_manage_members) {
+        const [memberRows, requestRows] = await Promise.all([
+          apiRequest("/companies/mine/members"), apiRequest("/companies/mine/join-requests")
+        ]);
+        setMembers(memberRows); setRequests(requestRows);
+      } else { setMembers([]); setRequests([]); }
+    } catch(e) { setError(e.message); }
+  }
+  useEffect(()=>{ load(); }, []);
+  async function requestJoin(event) {
+    event.preventDefault(); setError(""); setNotice(""); setBusy(true);
+    try {
+      const result = await apiRequest("/companies/join-requests", {method:"POST",body:JSON.stringify({company_id:selectedCompany,message:joinMessage || null})});
+      setNotice(result.message || "Join request submitted. The company owner must approve it."); setJoinMessage(""); await load();
+    } catch(e) { setError(e.message); } finally { setBusy(false); }
+  }
+  async function decideRequest(id, action) {
+    setError(""); setNotice("");
+    try { await apiRequest(`/companies/mine/join-requests/${id}/${action}`, {method:"POST"}); setNotice(action === "approve" ? "HR request approved." : "Request rejected."); await load(); }
+    catch(e) { setError(e.message); }
+  }
+  async function addMember(event) {
+    event.preventDefault(); setError(""); setNotice(""); setBusy(true);
+    try {
+      await apiRequest("/companies/mine/members", {method:"POST",body:JSON.stringify(hrForm)});
+      setNotice("HR account added. Share the temporary credentials securely and require a password change."); setHrForm({full_name:"",email:"",temporary_password:"",sub_role:"HR"}); await load();
+    } catch(e) { setError(e.message); } finally { setBusy(false); }
+  }
+  async function removeMember(id) {
+    if (!window.confirm("Remove this person from the company? Their user account will remain active but lose this company membership.")) return;
+    setError(""); setNotice("");
+    try { await apiRequest(`/companies/mine/members/${id}`, {method:"DELETE"}); setNotice("Company membership removed."); await load(); }
+    catch(e) { setError(e.message); }
+  }
+  return <div className="jobs-view">
+    <div className="welcome-row"><div><p className="eyebrow">COMPANY WORKSPACE</p><h1>Company & team<span className="heading-period">.</span></h1><p className="muted">Company profiles are platform-managed. Owners approve HR membership and manage the recruiting team.</p></div>{membership?.has_company && <button className="primary-button" onClick={onGoJobs}><BriefcaseBusiness size={15}/> Manage job posts</button>}</div>
+    {error && <div className="error-message jobs-message">{error}</div>}{notice && <div className="success-message jobs-message">{notice}</div>}
+    {!membership?.has_company ? <section className="panel"><div className="panel-heading"><div><h2>{membership?.pending_request ? "Join request pending" : "Request to join your company"}</h2><p>{membership?.pending_request ? `Your request to ${membership.pending_request.company_name} is awaiting owner approval.` : "Select the company you work for. Its owner will approve or reject your request."}</p></div></div>
+      {!membership?.pending_request && <form className="project-add-form" onSubmit={requestJoin}><label>Company<select required value={selectedCompany} onChange={e=>setSelectedCompany(e.target.value)}>{companies.map(c=><option key={c.id} value={c.id}>{c.name}{c.verified ? " · Verified" : ""}</option>)}</select></label><label>Message to company owner (optional)<textarea rows="3" maxLength="1000" value={joinMessage} onChange={e=>setJoinMessage(e.target.value)} placeholder="Your role and why you need access"/></label><button className="primary-button" disabled={busy || !selectedCompany}>{busy ? "Submitting…" : "Request to join"} <ArrowRight size={15}/></button></form>}
+      {companies.length===0 && <p className="profile-empty">No company profiles are available yet. Ask the TalentOS platform administrator to provision your company.</p>}
+    </section> : <>
+      <section className="panel"><div className="panel-heading"><div><h2>{membership.company.name}</h2><p>Membership role: {membership.sub_role}. Job posts and candidate records are scoped to this company.</p></div><span className="tiny-tag">{membership.can_manage_members ? "OWNER / ADMIN" : "HR MEMBER"}</span></div><button className="primary-button" onClick={onGoJobs}><BriefcaseBusiness size={15}/> Create or manage job posts</button></section>
+      {membership.can_manage_members && <>
+        <section className="panel"><div className="panel-heading"><div><h2>Pending HR join requests</h2><p>Approve only people who should have access to this company's recruitment workspace.</p></div><span className="tiny-tag">{requests.length} PENDING</span></div>
+          {requests.length===0 ? <p className="profile-empty">No pending requests.</p> : requests.map(r=><div className="step-row" key={r.id}><div><b>{r.full_name}</b><p>{r.email}{r.message ? " · "+r.message : ""}</p></div><div className="employer-job-actions"><button className="primary-button" onClick={()=>decideRequest(r.id,"approve")}>Approve</button><button className="secondary-button" onClick={()=>decideRequest(r.id,"reject")}>Reject</button></div></div>)}
+        </section>
+        <section className="panel"><div className="panel-heading"><div><h2>Company team</h2><p>Add HR accounts or remove active company membership. Temporary passwords must be changed at first login.</p></div><span className="tiny-tag">{members.length} MEMBERS</span></div>
+          {members.map(m=><div className="step-row" key={m.membership_id}><div><b>{m.full_name}</b><p>{m.email} · {m.sub_role}{m.must_change_password ? " · password change required" : ""}</p></div>{m.sub_role!=="OWNER" && <button className="secondary-button" onClick={()=>removeMember(m.user_id)}>Remove</button>}</div>)}
+          <form className="project-add-form" onSubmit={addMember}><h3>Add HR / recruiter</h3><div className="form-grid"><label>Full name<input required minLength="2" value={hrForm.full_name} onChange={e=>setHrForm({...hrForm,full_name:e.target.value})}/></label><label>Email<input required type="email" value={hrForm.email} onChange={e=>setHrForm({...hrForm,email:e.target.value})}/></label><label>Temporary password<input required minLength="12" type="password" value={hrForm.temporary_password} onChange={e=>setHrForm({...hrForm,temporary_password:e.target.value})}/></label><label>Role<select value={hrForm.sub_role} onChange={e=>setHrForm({...hrForm,sub_role:e.target.value})}><option value="HR">HR / Recruiter</option><option value="ADMIN">Company admin</option></select></label></div><button className="primary-button" disabled={busy}>{busy ? "Adding…" : "Add team member"} <Plus size={14}/></button></form>
+        </section>
+      </>}
+    </>}
+  </div>;
+}
+
+function AdminCompaniesCenter() {
+  const [companies, setCompanies] = useState([]);
+  const [form, setForm] = useState({name:"",description:"",website:"",owner_name:"",owner_email:"",temporary_password:""});
+  const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
+  const [busy, setBusy] = useState(false);
+  async function load() { try { setCompanies(await apiRequest("/companies/directory")); } catch(e) { setError(e.message); } }
+  useEffect(()=>{ load(); },[]);
+  async function create(event) {
+    event.preventDefault(); setBusy(true); setError(""); setNotice("");
+    try {
+      const result = await apiRequest("/companies/admin/create",{method:"POST",body:JSON.stringify(form)});
+      setNotice(`Created ${result.company} and owner account ${result.owner_email}. Share the temporary password privately; it must be changed at first login.`);
+      setForm({name:"",description:"",website:"",owner_name:"",owner_email:"",temporary_password:""}); await load();
+    } catch(e) { setError(e.message); } finally { setBusy(false); }
+  }
+  return <div className="jobs-view"><div className="welcome-row"><div><p className="eyebrow">PLATFORM ADMINISTRATION</p><h1>Company provisioning<span className="heading-period">.</span></h1><p className="muted">Create verified company profiles and hand owner credentials to the organisation. Public HR registration cannot create company records.</p></div></div>
+    {error && <div className="error-message jobs-message">{error}</div>}{notice && <div className="success-message jobs-message">{notice}</div>}
+    <form className="panel project-add-form" onSubmit={create}><div className="panel-heading"><div><h2>Create company profile</h2><p>Owner accounts are activated and forced to change their temporary password after first login.</p></div></div>
+      <div className="form-grid"><label>Company name<input required minLength="2" value={form.name} onChange={e=>setForm({...form,name:e.target.value})}/></label><label>Website<input type="url" value={form.website} onChange={e=>setForm({...form,website:e.target.value})} placeholder="https://example.com"/></label><label>Owner full name<input required minLength="2" value={form.owner_name} onChange={e=>setForm({...form,owner_name:e.target.value})}/></label><label>Owner email<input required type="email" value={form.owner_email} onChange={e=>setForm({...form,owner_email:e.target.value})}/></label><label>Temporary password<input required minLength="12" type="password" value={form.temporary_password} onChange={e=>setForm({...form,temporary_password:e.target.value})}/></label></div><label>Company description<textarea rows="3" value={form.description} onChange={e=>setForm({...form,description:e.target.value})}/></label><button className="primary-button" disabled={busy}>{busy ? "Creating…" : "Create company and owner"} <ArrowRight size={15}/></button>
+    </form><section className="panel"><div className="panel-heading"><div><h2>Company directory</h2><p>Profiles already provisioned by the platform.</p></div><span className="tiny-tag">{companies.length} COMPANIES</span></div>{companies.map(c=><div className="step-row" key={c.id}><div><b>{c.name}</b><p>{c.description || c.slug}</p></div><span className="job-status status-published">{c.verified ? "VERIFIED" : "PENDING"}</span></div>)}</section>
+  </div>;
+}
+
 function ChangePasswordPanel({ user, onUpdated }) {
   const [current, setCurrent] = useState("");
   const [next, setNext] = useState("");
@@ -194,7 +295,7 @@ function ChangePasswordPanel({ user, onUpdated }) {
 function Dashboard({ user, onLogout, onUserUpdate }) {
   const [stats, setStats] = useState(null);
   const [status, setStatus] = useState("");
-  const [view, setView] = useState("dashboard");
+  const [view, setView] = useState(user?.role === "COMPANY_HR" ? "company" : "dashboard");
   useEffect(() => {
     if (user?.role === "ADMIN") apiRequest("/admin/overview").then(setStats).catch((e)=>setStatus(e.message));
   }, [user]);
@@ -216,20 +317,21 @@ function Dashboard({ user, onLogout, onUserUpdate }) {
       <nav className="side-nav">
         <p className="nav-caption">OVERVIEW</p><button className={`nav-item ${view === "dashboard" ? "active" : ""}`} onClick={()=>setView("dashboard")}><LayoutDashboard size={17}/> Dashboard</button>
         <button className={`nav-item ${view === "jobs" ? "active" : ""}`} onClick={()=>setView("jobs")}><BriefcaseBusiness size={17}/> {student ? "Explore jobs" : "Job openings"}</button>
+        {user?.role === "COMPANY_HR" && <button className={`nav-item ${view === "company" ? "active" : ""}`} onClick={()=>setView("company")}><Building2 size={17}/> Company & team</button>}
         {student && <button className={`nav-item ${view === "profile" ? "active" : ""}`} onClick={()=>setView("profile")}><UserRound size={17}/> My profile</button>}
         <a className="nav-item"><Users size={17}/> {student ? "My applications" : "Candidates"} <span className="nav-soon">Soon</span></a>
         <a className="nav-item"><Sparkles size={17}/> AI matching <span className="nav-soon">Soon</span></a>
         <p className="nav-caption nav-caption-spaced">MANAGE</p>
         <button className={`nav-item ${view === "assessments" ? "active" : ""}`} onClick={()=>setView("assessments")}><FileText size={17}/> Assessments</button>
         <a className="nav-item"><Activity size={17}/> Analytics <span className="nav-soon">Soon</span></a>
-        {admin && <a className="nav-item"><ShieldCheck size={17}/> Administration</a>}
+        {admin && <button className={`nav-item ${view === "admin-companies" ? "active" : ""}`} onClick={()=>setView("admin-companies")}><ShieldCheck size={17}/> Administration</button>}
       </nav>
       <div className="sidebar-bottom"><div className="help-card"><CircleHelp size={18}/><div><b>Need a hand?</b><small>Explore the platform guide</small></div><ArrowUpRight size={15}/></div><button className="logout-button" onClick={onLogout}><LogOut size={17}/> Sign out</button></div>
     </aside>
     <main className="main-area">
       <header className="topbar"><div className="breadcrumbs">Workspace <span>/</span> <b>{view === "jobs" ? "Job openings" : view === "profile" ? "My profile" : view === "assessments" ? "Assessments" : "Dashboard"}</b></div><div className="top-actions"><button className="icon-button" aria-label="Search"><Search size={17}/></button><button className="icon-button" aria-label="Notifications"><Bell size={17}/></button><div className="top-avatar">{(user?.full_name || "T").slice(0,1).toUpperCase()}</div></div></header>
       <div className="page-content">
-        {view === "jobs" ? <JobCenter user={user}/> : view === "profile" && student ? <ProfileCenter/> : view === "assessments" ? <AssessmentCenter user={user}/> : <>
+        {view === "jobs" ? <JobCenter user={user}/> : view === "company" && user?.role === "COMPANY_HR" ? <CompanyCenter user={user} onGoJobs={()=>setView("jobs")}/> : view === "admin-companies" && admin ? <AdminCompaniesCenter/> : view === "profile" && student ? <ProfileCenter/> : view === "assessments" ? <AssessmentCenter user={user}/> : <>
         <div className="welcome-row"><div><p className="eyebrow">MONDAY · YOUR WORKSPACE</p><h1>{title}<span className="heading-period">.</span></h1><p className="muted">Hi {user?.full_name?.split(" ")[0] || "there"}, here's what's happening with your workspace.</p></div><div className="date-pill"><Activity size={15}/> Live workspace</div></div>
         {user?.must_change_password && <ChangePasswordPanel user={user} onUpdated={onUserUpdate}/>}
         <div className="notice-banner"><div className="notice-icon"><Sparkles size={19}/></div><div><b>Your recruitment copilot is being prepared</b><p>TalentOS is designed to handle repetitive recruiting tasks and explain its recommendations. More workflow modules are coming online in phases.</p></div><span className="notice-status"><span/> Foundation</span></div>
