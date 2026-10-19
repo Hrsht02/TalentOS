@@ -367,9 +367,18 @@ async def submit_aptitude_assessment(invite_id: UUID, payload: AssessmentSubmitR
     score = round(max(0.0, min(100.0, raw / max_marks * 100)), 2) if max_marks else 0.0
     attempt.answers = {str(qid): answer for qid, answer in payload.answers.items()}
     attempt.score, attempt.max_score = score, 100.0
+    aptitude_result = {"score": score, "correct": correct, "answered": answered,
+                       "total": len(questions), "raw_score": round(raw, 2),
+                       "raw_max_score": round(max_marks, 2)}
+    if assessment.assessment_type == "MIXED":
+        # Keep the attempt open so the candidate can also submit its coding section.
+        attempt.result_summary = {**(attempt.result_summary or {}), "aptitude": aptitude_result}
+        await db.commit()
+        return {"status": "aptitude_submitted", "attempt_id": str(attempt.id), "score": score,
+                "max_score": 100, "correct": correct, "answered": answered,
+                "total_questions": len(questions), "next_step": "complete_coding_section_and_finish"}
     attempt.status, attempt.submitted_at = "SUBMITTED", now
-    attempt.result_summary = {"correct": correct, "answered": answered, "total": len(questions),
-                              "raw_score": round(raw, 2), "raw_max_score": round(max_marks, 2)}
+    attempt.result_summary = aptitude_result
     invite.status = AssessmentStatus.COMPLETED if invite.attempts_used >= assessment.max_attempts else AssessmentStatus.SUBMITTED
     await db.commit()
     return {"status": "submitted", "attempt_id": str(attempt.id), "score": score, "max_score": 100,
@@ -459,3 +468,84 @@ async def submit_coding_solution(
         raise HTTPException(status_code=503, detail="Submission saved but the evaluation queue is unavailable; retry later with a new idempotency key") from exc
     return {"submission_id": str(submission.id), "status": submission.status.value,
             "attempt_number": submission.attempt_number, "duplicate": False}
+
+
+@router.post("/invites/{invite_id}/finish")
+async def finish_assessment(
+    invite_id: UUID,
+    user: User = Depends(require_roles(UserRole.STUDENT)),
+    db: AsyncSession = Depends(get_db),
+):
+    """Finalize a coding or mixed attempt after queued code submissions have completed."""
+    from app.models import Submission, SubmissionResult
+    student_id = await student_for_user(db, user)
+    row = (await db.execute(select(AssessmentInvite, Assessment)
+        .join(Assessment, Assessment.id == AssessmentInvite.assessment_id)
+        .join(Application, Application.id == AssessmentInvite.application_id)
+        .where(AssessmentInvite.id == invite_id, Application.student_id == student_id))).first()
+    if not row:
+        raise HTTPException(status_code=404, detail="Assessment invitation not found")
+    invite, assessment = row
+    if assessment.assessment_type not in {"CODING", "MIXED"}:
+        raise HTTPException(status_code=409, detail="Use the aptitude submission endpoint to finish this assessment")
+    attempt = await db.scalar(select(AssessmentAttempt).where(
+        AssessmentAttempt.assessment_invite_id == invite.id,
+        AssessmentAttempt.status == "IN_PROGRESS"
+    ).order_by(AssessmentAttempt.attempt_number.desc()))
+    if not attempt:
+        raise HTTPException(status_code=409, detail="No active attempt to finish")
+    now = datetime.now(timezone.utc)
+    if now >= invite.deadline or now >= attempt.started_at + timedelta(minutes=assessment.duration_minutes):
+        invite.status = AssessmentStatus.EXPIRED
+        attempt.status = "EXPIRED"
+        attempt.submitted_at = now
+        await db.commit()
+        raise HTTPException(status_code=410, detail="Assessment time limit has expired")
+    config = assessment.config or {}
+    aptitude_ids = [UUID(value) for value in config.get("aptitude_question_ids", [])]
+    if assessment.assessment_type == "MIXED" and aptitude_ids and not (attempt.result_summary or {}).get("aptitude"):
+        raise HTTPException(status_code=409, detail="Submit the aptitude section before finishing")
+    coding_ids = [UUID(value) for value in config.get("coding_question_ids", [])]
+    if not coding_ids:
+        raise HTTPException(status_code=409, detail="No coding questions are configured")
+    rows = (await db.execute(select(Submission, SubmissionResult).outerjoin(
+        SubmissionResult, SubmissionResult.submission_id == Submission.id
+    ).where(
+        Submission.assessment_invite_id == invite.id,
+        Submission.attempt_number == attempt.attempt_number,
+        Submission.coding_question_id.in_(coding_ids),
+    ).order_by(Submission.created_at.desc()))).all()
+    latest = {}
+    for submission, result in rows:
+        if submission.coding_question_id not in latest:
+            latest[submission.coding_question_id] = (submission, result)
+    missing = [str(qid) for qid in coding_ids if qid not in latest]
+    pending = [str(qid) for qid in coding_ids if qid in latest and (
+        latest[qid][0].status.value in {"QUEUED", "RUNNING"} or latest[qid][1] is None
+    )]
+    if missing:
+        raise HTTPException(status_code=409, detail="Submit code for every coding question before finishing")
+    if pending:
+        raise HTTPException(status_code=409, detail="Some code submissions are still being evaluated; check again shortly")
+    coding_scores = [float(latest[qid][1].score) for qid in coding_ids]
+    coding_score = round(sum(coding_scores) / len(coding_scores), 2)
+    summary = {**(attempt.result_summary or {}), "coding": {
+        "score": coding_score,
+        "questions": [{"question_id": str(qid), "score": float(latest[qid][1].score),
+                       "verdict": latest[qid][1].verdict,
+                       "passed": latest[qid][1].passed_count, "total": latest[qid][1].total_count}
+                      for qid in coding_ids],
+    }}
+    if assessment.assessment_type == "MIXED":
+        aptitude_score = float(summary["aptitude"]["score"])
+        overall = round((aptitude_score + coding_score) / 2, 2)
+    else:
+        overall = coding_score
+    summary["overall_score"] = overall
+    attempt.result_summary = summary
+    attempt.score, attempt.max_score = overall, 100.0
+    attempt.status, attempt.submitted_at = "SUBMITTED", now
+    invite.status = AssessmentStatus.COMPLETED if invite.attempts_used >= assessment.max_attempts else AssessmentStatus.SUBMITTED
+    await db.commit()
+    return {"status": "submitted", "attempt_id": str(attempt.id), "score": overall,
+            "max_score": 100, "result_summary": summary}
