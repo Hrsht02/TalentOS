@@ -110,3 +110,8 @@
 .submission-state{font-size:10px;color:#68758b}
 @media(max-width:1000px){.assessment-tool-grid{grid-template-columns:1fr}.assessment-layout{grid-template-columns:1fr}}
 @media(max-width:600px){.assessment-invite{align-items:flex-start;flex-wrap:wrap}.assessment-invite-copy{min-width:calc(100% - 55px)}.assessment-invite>.job-status{margin-left:44px}.question-option-inputs{grid-template-columns:1fr}.assessment-question{padding:12px}}
+
+.ranking-breakdown{display:flex;align-items:center;justify-content:space-between;gap:10px;min-width:110px;margin:3px 0;font-size:9px;color:#7c8798}
+.ranking-breakdown b{color:#46536a}
+.matches-table td small{display:block;color:#8a94a4;font-size:9px;margin-top:4px}
+.matches-table td .eligibility{white-space:nowrap}
