@@ -247,6 +247,17 @@ async def get_my_assessment(invite_id: UUID, user: User = Depends(require_roles(
     if not row:
         raise HTTPException(status_code=404, detail="Assessment invitation not found")
     invite, assessment = row
+    latest_attempt = await db.scalar(select(AssessmentAttempt).where(
+        AssessmentAttempt.assessment_invite_id == invite.id
+    ).order_by(AssessmentAttempt.attempt_number.desc()))
+    attempt_summary = (latest_attempt.result_summary or {}) if latest_attempt else {}
+    aptitude_submitted = bool(attempt_summary.get("aptitude")) or (
+        assessment.assessment_type == "APTITUDE" and latest_attempt is not None
+        and latest_attempt.status == "SUBMITTED"
+    )
+    attempt_result = None
+    if latest_attempt and latest_attempt.status == "SUBMITTED":
+        attempt_result = {"score": latest_attempt.score, "result_summary": attempt_summary}
     config = assessment.config or {}
     aptitude_ids = [UUID(value) for value in config.get("aptitude_question_ids", [])]
     aptitude = list((await db.scalars(select(AptitudeQuestion).where(
@@ -257,6 +268,8 @@ async def get_my_assessment(invite_id: UUID, user: User = Depends(require_roles(
     return {"id": str(invite.id), "status": invite.status.value, "deadline": invite.deadline.isoformat(),
         "starts_before": invite.starts_before.isoformat() if invite.starts_before else None,
         "attempts_used": invite.attempts_used,
+        "aptitude_submitted": aptitude_submitted,
+        "attempt_result": attempt_result,
         "assessment": {"id": str(assessment.id), "title": assessment.title,
             "assessment_type": assessment.assessment_type, "duration_minutes": assessment.duration_minutes,
             "max_attempts": assessment.max_attempts},
