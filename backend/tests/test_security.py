@@ -1,6 +1,6 @@
 import pytest
 from pydantic import ValidationError
-from app.core.config import Settings
+from app.core.config import Settings, settings
 from app.core.security import create_access_token, hash_password, verify_password
 from jose import jwt
 from app.core.security import ALGORITHM
@@ -15,7 +15,7 @@ def test_password_hash_verifies_only_correct_password():
 
 def test_access_token_contains_expected_claims():
     token = create_access_token("123e4567-e89b-12d3-a456-426614174000", "STUDENT")
-    claims = jwt.decode(token, Settings(_env_file=None).secret_key, algorithms=[ALGORITHM])
+    claims = jwt.decode(token, settings.secret_key, algorithms=[ALGORITHM])
     assert claims["sub"] == "123e4567-e89b-12d3-a456-426614174000"
     assert claims["role"] == "STUDENT"
     assert claims["type"] == "access"
