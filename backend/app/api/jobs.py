@@ -7,7 +7,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import get_current_user, require_roles
 from app.db.session import get_db
-from app.models import Application, ApplicationStatus, CompanyMember, Job, JobStatus, Student, User, UserRole
+from app.models import Application, ApplicationStatus, Company, CompanyMember, Job, JobStatus, Student, User, UserRole
 from app.schemas.jobs import ApplicationResponse, JobCreate, JobResponse
 
 logger = logging.getLogger(__name__)
@@ -49,11 +49,15 @@ async def list_published_jobs(
     offset: int = Query(default=0, ge=0),
     db: AsyncSession = Depends(get_db),
 ):
-    query = select(Job).where(Job.status == JobStatus.PUBLISHED, Job.deleted_at.is_(None))
+    query = select(Job, Company.name).join(Company, Company.id == Job.company_id).where(
+        Job.status == JobStatus.PUBLISHED, Job.deleted_at.is_(None), Company.suspended.is_(False)
+    )
     if q and q.strip():
-        query = query.where(Job.title.ilike(f"%{q.strip()}%"))
-    query = query.order_by(Job.published_at.desc()).offset(offset).limit(limit)
-    return list((await db.scalars(query)).all())
+        term = f"%{q.strip()}%"
+        query = query.where((Job.title.ilike(term)) | (Company.name.ilike(term)))
+    rows = (await db.execute(query.order_by(Job.published_at.desc()).offset(offset).limit(limit))).all()
+    return [{**{column.name: getattr(job, column.name) for column in Job.__table__.columns}, "company_name": company_name}
+            for job, company_name in rows]
 
 
 @router.post("", response_model=JobResponse, status_code=201)
@@ -85,8 +89,12 @@ async def list_my_jobs(
     company_ids = select(CompanyMember.company_id).where(
         CompanyMember.user_id == user.id, CompanyMember.active.is_(True)
     )
-    query = select(Job).where(Job.company_id.in_(company_ids), Job.deleted_at.is_(None)).order_by(Job.created_at.desc()).limit(100)
-    return list((await db.scalars(query)).all())
+    query = select(Job, Company.name).join(Company, Company.id == Job.company_id).where(
+        Job.company_id.in_(company_ids), Job.deleted_at.is_(None)
+    ).order_by(Job.created_at.desc()).limit(100)
+    rows = (await db.execute(query)).all()
+    return [{**{column.name: getattr(job, column.name) for column in Job.__table__.columns}, "company_name": company_name}
+            for job, company_name in rows]
 
 
 @router.post("/{job_id}/publish", response_model=JobResponse)
