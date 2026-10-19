@@ -110,3 +110,170 @@ def match_candidates(self, job_id: str) -> dict[str, object]:
         # Celery is synchronous; each asyncio.run creates a fresh event loop.
         # Dispose pooled async connections so they are not reused across loops.
         asyncio.run(engine.dispose())
+
+
+
+@celery_app.task(bind=True, max_retries=2, default_retry_delay=15, name="app.tasks.evaluate_coding_submission")
+def evaluate_coding_submission(self, submission_id: str) -> dict[str, object]:
+    """Evaluate one submission through a configured Judge0-compatible sandbox API."""
+    import asyncio
+    import base64
+    import time
+    import httpx
+    from sqlalchemy import select
+    from app.core.config import settings
+    from app.db.session import AsyncSessionLocal, engine
+    from app.models import CodingQuestion, Submission, SubmissionResult, SubmissionStatus, TestCase
+
+    language_ids = {"python": 71, "cpp": 54, "java": 62, "javascript": 63}
+    import uuid
+    parsed_id = uuid.UUID(submission_id)
+
+    async def mark_infrastructure_failure() -> None:
+        async with AsyncSessionLocal() as db:
+            submission = await db.scalar(select(Submission).where(Submission.id == parsed_id))
+            if submission:
+                submission.status = SubmissionStatus.FAILED
+                await db.commit()
+
+    async def load_data():
+        async with AsyncSessionLocal() as db:
+            submission = await db.scalar(select(Submission).where(Submission.id == parsed_id))
+            if not submission:
+                return None
+            question = await db.scalar(select(CodingQuestion).where(CodingQuestion.id == submission.coding_question_id))
+            cases = list((await db.scalars(select(TestCase).where(
+                TestCase.coding_question_id == submission.coding_question_id
+            ).order_by(TestCase.position.asc()).limit(50))).all())
+            return {
+                "submission_id": submission.id,
+                "status": submission.status,
+                "language": submission.language,
+                "source_code": submission.source_code,
+                "question": question,
+                "cases": cases,
+            }
+
+    try:
+        if not settings.judge0_api_url:
+            raise RuntimeError("JUDGE0_API_URL is not configured")
+        data = asyncio.run(load_data())
+        if not data:
+            return {"status": "skipped", "reason": "submission_not_found"}
+        if not data["cases"]:
+            raise RuntimeError("No test cases are configured for this coding question")
+        if data["language"] not in language_ids:
+            raise RuntimeError("Unsupported coding language")
+        async def mark_running():
+            async with AsyncSessionLocal() as db:
+                submission = await db.scalar(select(Submission).where(Submission.id == parsed_id))
+                if submission:
+                    submission.status = SubmissionStatus.RUNNING
+                    await db.commit()
+        asyncio.run(mark_running())
+
+        base_url = settings.judge0_api_url.rstrip("/")
+        headers = {"Content-Type": "application/json"}
+        if settings.judge0_api_key:
+            headers["X-Auth-Token"] = settings.judge0_api_key
+        deadline = time.monotonic() + max(10, settings.judge0_timeout_seconds)
+        summaries = []
+        passed_count = 0
+        total_weight = sum(max(0.0, case.weight) for case in data["cases"])
+        passed_weight = 0.0
+        verdicts = []
+        with httpx.Client(timeout=10.0, headers=headers) as client:
+            for case in data["cases"]:
+                if time.monotonic() >= deadline:
+                    raise TimeoutError("Judge0 evaluation exceeded its configured total time budget")
+                encoded_code = base64.b64encode(data["source_code"].encode()).decode()
+                encoded_stdin = base64.b64encode(case.input_data.encode()).decode()
+                encoded_expected = base64.b64encode(case.expected_output.encode()).decode()
+                response = client.post(
+                    base_url + "/submissions",
+                    params={"base64_encoded": "true", "wait": "false"},
+                    json={
+                        "source_code": encoded_code,
+                        "language_id": language_ids[data["language"]],
+                        "stdin": encoded_stdin,
+                        "expected_output": encoded_expected,
+                        "cpu_time_limit": max(0.1, data["question"].time_limit_ms / 1000),
+                        "memory_limit": data["question"].memory_limit_mb * 1024,
+                    },
+                )
+                if response.status_code == 429 or response.status_code >= 500:
+                    response.raise_for_status()
+                response.raise_for_status()
+                token = response.json().get("token")
+                if not token:
+                    raise RuntimeError("Judge0 did not return a submission token")
+                result = None
+                while time.monotonic() < deadline:
+                    poll = client.get(
+                        base_url + "/submissions/" + token,
+                        params={"base64_encoded": "true", "fields": "status,stdout,stderr,compile_output,time,memory"},
+                    )
+                    if poll.status_code == 429 or poll.status_code >= 500:
+                        poll.raise_for_status()
+                    poll.raise_for_status()
+                    result = poll.json()
+                    status = result.get("status") or {}
+                    if status.get("id", 0) not in (1, 2):
+                        break
+                    time.sleep(max(0.25, settings.judge0_poll_interval_seconds))
+                if not result or (result.get("status") or {}).get("id") in (1, 2):
+                    raise TimeoutError("Judge0 did not finish before the evaluation time budget")
+                status = result.get("status") or {}
+                status_id = status.get("id")
+                accepted = status_id == 3
+                passed_count += int(accepted)
+                passed_weight += max(0.0, case.weight) if accepted else 0.0
+                verdicts.append(status.get("description", "Unknown"))
+                summaries.append({
+                    "test_case_id": str(case.id),
+                    "status_id": status_id,
+                    "status": status.get("description", "Unknown"),
+                    "passed": accepted,
+                    "runtime": result.get("time"),
+                    "memory": result.get("memory"),
+                })
+                if status_id in (6, 13, 14):
+                    # Compilation/internal errors will not improve on later test cases.
+                    break
+
+        score = round((passed_weight / total_weight) * 100, 2) if total_weight else 0.0
+        verdict = "ACCEPTED" if summaries and all(item["passed"] for item in summaries) and len(summaries) == len(data["cases"]) else (
+            "PARTIAL" if passed_count else (verdicts[-1].upper().replace(" ", "_") if verdicts else "ERROR")
+        )
+        runtime_values = [float(item["runtime"]) for item in summaries if item["runtime"] is not None]
+        memory_values = [int(item["memory"]) for item in summaries if item["memory"] is not None]
+        async def save_results():
+            async with AsyncSessionLocal() as db:
+                submission = await db.scalar(select(Submission).where(Submission.id == parsed_id))
+                if not submission:
+                    return
+                existing = await db.scalar(select(SubmissionResult).where(SubmissionResult.submission_id == parsed_id))
+                values = dict(
+                    score=score, passed_count=passed_count, total_count=len(data["cases"]),
+                    runtime_ms=int(max(runtime_values) * 1000) if runtime_values else None,
+                    memory_kb=max(memory_values) if memory_values else None,
+                    verdict=verdict, result_details={"tests": summaries},
+                )
+                if existing:
+                    for key, value in values.items():
+                        setattr(existing, key, value)
+                else:
+                    db.add(SubmissionResult(submission_id=parsed_id, **values))
+                submission.status = SubmissionStatus.COMPLETED
+                await db.commit()
+        asyncio.run(save_results())
+        logger.info("Coding evaluation completed submission_id=%s verdict=%s", submission_id, verdict)
+        return {"status": "completed", "submission_id": submission_id, "verdict": verdict, "score": score}
+    except Exception as exc:
+        logger.warning("Coding evaluation failed submission_id=%s error_type=%s", submission_id, type(exc).__name__)
+        if self.request.retries < self.max_retries:
+            raise self.retry(exc=exc)
+        asyncio.run(mark_infrastructure_failure())
+        raise
+    finally:
+        asyncio.run(engine.dispose())
