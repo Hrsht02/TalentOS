@@ -133,3 +133,35 @@ The script is idempotent and seeds five platform aptitude questions plus three c
 Coding submissions require a separately hosted Judge0-compatible service. Configure `JUDGE0_API_URL` and, if needed, `JUDGE0_API_KEY` in Render. TalentOS never runs candidate source code in the FastAPI process. The worker queues the source to the configured judge and stores aggregate scores and verdicts. Do not enable coding assessments in production until the judge endpoint, language IDs, resource limits, and test cases have been validated.
 
 The initial language mapping is Python 3 (Judge0 ID 71), C++ (54), Java (62), and JavaScript (63). Confirm these IDs against the specific Judge0 instance before production use.
+
+
+## Render deployment (native services, no Docker)
+
+A root-level `render.yaml` defines:
+- `talentos-api`: FastAPI web service. It applies Alembic migrations on startup and serves `/health`.
+- `talentos-worker`: Celery worker for AI and matching jobs.
+- `talentos-postgres`: managed PostgreSQL.
+- `talentos-redis`: managed Redis-compatible Key Value service.
+
+Before syncing the Blueprint, review the selected Render plans and current pricing. The Blueprint uses paid starter services for the worker and Redis plus a small managed PostgreSQL plan; do not assume this setup is free.
+
+During Blueprint setup, supply:
+- `SECRET_KEY`: a unique random secret of at least 32 characters. Render shares the API value with the worker.
+- `ADMIN_SEED_EMAIL` and `ADMIN_SEED_PASSWORD`: unique values; production password must be at least 16 characters and not the development default.
+- `FRONTEND_URL` and `CORS_ORIGINS`: your exact Vercel deployment origin, for example `https://your-project.vercel.app`.
+- `GEMINI_API_KEY` and `GEMINI_API_KEY_2`: keys for two Gemini accounts you are authorized to use.
+- `XAI_API_KEY`: xAI API key for Grok fallback.
+- `JUDGE0_API_URL` and optional `JUDGE0_API_KEY`: a configured Judge0-compatible isolated execution service. Leave it blank only while coding evaluation is intentionally disabled.
+
+The web service and worker share the same database, Redis, AI keys, and signing secret. Never commit real keys to GitHub.
+
+## Vercel deployment
+
+1. Import `Hrsht02/TalentOS` in Vercel.
+2. Set **Root Directory** to `frontend`.
+3. Use Vite, build command `npm run build`, and output directory `dist`.
+4. Add `VITE_API_BASE_URL=https://YOUR-RENDER-API.onrender.com/api/v1`.
+5. Deploy the frontend.
+6. Copy the exact Vercel origin into Render's `FRONTEND_URL` and `CORS_ORIGINS`, then redeploy the API.
+
+The current GitHub Actions workflow runs backend compilation/tests and a Vite production build on pushes to `main`. A green CI run verifies those checks, not that Render/Vercel services are deployed or that third-party credentials work.
