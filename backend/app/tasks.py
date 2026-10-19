@@ -308,8 +308,6 @@ def rank_job_applicants(self, job_id: str) -> dict[str, object]:
                 Student.id.in_([app.student_id for app in applications])
             ))).all())
             student_by_id = {student.id: student for student in students}
-            matches = list((await db.scalars(select(Match).where(Match.job_id == job.id))).all())
-            match_by_student = {match.student_id: match for match in matches}
             skills = list((await db.scalars(select(StudentSkill).where(
                 StudentSkill.student_id.in_(list(student_by_id))
             ))).all())
@@ -326,7 +324,13 @@ def rank_job_applicants(self, job_id: str) -> dict[str, object]:
             for project in projects:
                 projects_by_student[project.student_id] = projects_by_student.get(project.student_id, 0) + 1
 
-            required_skills = [str(s).strip().lower() for s in (job.requirements or {}).get("skills", []) if str(s).strip()]
+            requirements = job.requirements or {}
+            eligibility = job.eligibility or {}
+            required_skills = [str(s).strip().lower() for s in requirements.get("skills", []) if str(s).strip()]
+            min_cgpa = eligibility.get("minimum_cgpa", requirements.get("minimum_cgpa"))
+            max_backlogs = eligibility.get("maximum_backlogs", requirements.get("maximum_backlogs"))
+            allowed_graduation_years = eligibility.get("graduation_years")
+            location_required = eligibility.get("location")
             aptitude_scores: dict[uuid.UUID, list[float]] = {}
             coding_scores: dict[uuid.UUID, list[float]] = {}
             for application in applications:
@@ -383,8 +387,15 @@ def rank_job_applicants(self, job_id: str) -> dict[str, object]:
                 valid = {key: value for key, value in components.items() if value["weight"] > 0}
                 weight_sum = sum(value["weight"] for value in valid.values())
                 total_score = round(sum(value["score"] * value["weight"] for value in valid.values()) / weight_sum, 2) if weight_sum else 0.0
-                candidate_match = match_by_student.get(student.id)
-                eligible = candidate_match.eligible if candidate_match else True
+                eligible = True
+                if min_cgpa is not None and (student.cgpa is None or student.cgpa < float(min_cgpa)):
+                    eligible = False
+                if max_backlogs is not None and (student.backlogs is None or student.backlogs > int(max_backlogs)):
+                    eligible = False
+                if allowed_graduation_years and student.graduation_year not in allowed_graduation_years:
+                    eligible = False
+                if location_required and student.location and str(location_required).lower() not in student.location.lower():
+                    eligible = False
                 scored.append((application, total_score, valid, eligible))
 
             scored.sort(key=lambda item: (-int(item[3]), -item[1], item[0].created_at))
