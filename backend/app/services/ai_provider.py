@@ -169,9 +169,12 @@ class AIProviderRouter:
                         errors.append(message)
                         logger.warning("AI provider failure provider=%s status=%s retryable=%s error_type=%s",
                                        provider.name, status, retryable, type(exc).__name__)
-                        if status == 429 or self._quota_error(response) or (status is not None and status >= 500) or isinstance(exc, (httpx.TimeoutException, httpx.TransportError)):
+                        quota_hit = status == 429 or self._quota_error(response)
+                        if quota_hit or (status is not None and status >= 500) or isinstance(exc, (httpx.TimeoutException, httpx.TransportError)):
                             await self._cool_down(provider.name)
-                        if not retryable:
+                        # A quota/rate-limit response means this key should be skipped
+                        # immediately; retrying it wastes quota and delays the fallback.
+                        if quota_hit or not retryable:
                             break
                         if attempt < max(1, settings.ai_max_retries_per_provider + 1) - 1:
                             await asyncio.sleep(min(2 ** attempt, 3))
