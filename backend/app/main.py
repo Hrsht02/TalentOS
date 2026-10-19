@@ -6,6 +6,7 @@ from app.core.config import settings
 from app.api.auth import router as auth_router
 from app.api.admin import router as admin_router
 from app.api.jobs import router as jobs_router
+from app.api.profile import router as profile_router
 
 app = FastAPI(
     title=settings.app_name,
@@ -27,6 +28,7 @@ app.add_middleware(
 app.include_router(auth_router, prefix=settings.api_v1_prefix)
 app.include_router(admin_router, prefix=settings.api_v1_prefix)
 app.include_router(jobs_router, prefix=settings.api_v1_prefix)
+app.include_router(profile_router, prefix=settings.api_v1_prefix)
 
 
 @app.get("/health", tags=["system"])
