@@ -11,6 +11,7 @@ from app.models import (
     Application, Assessment, AssessmentAttempt, AssessmentInvite, AssessmentStatus,
     AptitudeQuestion, CodingQuestion, CompanyMember, Job, Student, User, UserRole,
 )
+from app.schemas.coding import CodingSubmissionCreate
 from app.schemas.assessments import (
     AssessmentCreate, AssessmentSubmitRequest, AptitudeQuestionCreate,
     CodingQuestionCreate, InviteCreate,
@@ -373,3 +374,88 @@ async def submit_aptitude_assessment(invite_id: UUID, payload: AssessmentSubmitR
     await db.commit()
     return {"status": "submitted", "attempt_id": str(attempt.id), "score": score, "max_score": 100,
             "correct": correct, "answered": answered, "total_questions": len(questions)}
+
+
+@router.post("/invites/{invite_id}/coding-submissions", status_code=202)
+async def submit_coding_solution(
+    invite_id: UUID,
+    payload: CodingSubmissionCreate,
+    idempotency_key: str = Header(..., alias="Idempotency-Key", min_length=8, max_length=160),
+    user: User = Depends(require_roles(UserRole.STUDENT)),
+    db: AsyncSession = Depends(get_db),
+):
+    """Queue source code for an external sandbox; never execute user code in the API."""
+    from app.core.config import settings
+    from app.models import Submission, SubmissionStatus
+    if not settings.judge0_api_url:
+        raise HTTPException(status_code=503, detail="Coding judge is not configured yet. Ask the platform administrator to configure JUDGE0_API_URL.")
+
+    student_id = await student_for_user(db, user)
+    row = (await db.execute(
+        select(AssessmentInvite, Assessment)
+        .join(Assessment, Assessment.id == AssessmentInvite.assessment_id)
+        .join(Application, Application.id == AssessmentInvite.application_id)
+        .where(AssessmentInvite.id == invite_id, Application.student_id == student_id)
+    )).first()
+    if not row:
+        raise HTTPException(status_code=404, detail="Assessment invitation not found")
+    invite, assessment = row
+    if assessment.assessment_type not in {"CODING", "MIXED"}:
+        raise HTTPException(status_code=409, detail="This assessment has no coding section")
+    now = datetime.now(timezone.utc)
+    if invite.status != AssessmentStatus.IN_PROGRESS:
+        raise HTTPException(status_code=409, detail="Start the assessment before submitting code")
+    if now >= invite.deadline:
+        raise HTTPException(status_code=410, detail="Assessment deadline has passed")
+    attempt = await db.scalar(select(AssessmentAttempt).where(
+        AssessmentAttempt.assessment_invite_id == invite.id,
+        AssessmentAttempt.status == "IN_PROGRESS"
+    ).order_by(AssessmentAttempt.attempt_number.desc()))
+    if not attempt:
+        raise HTTPException(status_code=409, detail="No active assessment attempt")
+    if now >= attempt.started_at + timedelta(minutes=assessment.duration_minutes):
+        attempt.status = "EXPIRED"
+        attempt.submitted_at = now
+        invite.status = AssessmentStatus.EXPIRED
+        await db.commit()
+        raise HTTPException(status_code=410, detail="Assessment time limit has expired")
+
+    configured_ids = {UUID(value) for value in (assessment.config or {}).get("coding_question_ids", [])}
+    if payload.coding_question_id not in configured_ids:
+        raise HTTPException(status_code=422, detail="Coding question is not part of this assessment")
+    question = await db.scalar(select(CodingQuestion).where(
+        CodingQuestion.id == payload.coding_question_id, CodingQuestion.active.is_(True)))
+    if not question:
+        raise HTTPException(status_code=404, detail="Coding question not found")
+
+    existing = await db.scalar(select(Submission).where(
+        Submission.assessment_invite_id == invite.id,
+        Submission.idempotency_key == idempotency_key))
+    if existing:
+        if existing.coding_question_id != question.id or existing.source_code != payload.source_code:
+            raise HTTPException(status_code=409, detail="Idempotency-Key was already used for a different submission")
+        return {"submission_id": str(existing.id), "status": existing.status.value,
+                "attempt_number": existing.attempt_number, "duplicate": True}
+
+    submission = Submission(
+        assessment_invite_id=invite.id, coding_question_id=question.id, student_id=student_id,
+        idempotency_key=idempotency_key, language=payload.language, source_code=payload.source_code,
+        status=SubmissionStatus.QUEUED, attempt_number=attempt.attempt_number,
+    )
+    db.add(submission)
+    try:
+        await db.commit()
+        await db.refresh(submission)
+    except IntegrityError:
+        await db.rollback()
+        raise HTTPException(status_code=409, detail="Submission could not be created")
+
+    try:
+        from app.worker import celery_app
+        celery_app.send_task("app.tasks.evaluate_coding_submission", args=[str(submission.id)])
+    except Exception as exc:
+        submission.status = SubmissionStatus.FAILED
+        await db.commit()
+        raise HTTPException(status_code=503, detail="Submission saved but the evaluation queue is unavailable; retry later with a new idempotency key") from exc
+    return {"submission_id": str(submission.id), "status": submission.status.value,
+            "attempt_number": submission.attempt_number, "duplicate": False}
