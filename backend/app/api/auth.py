@@ -23,8 +23,11 @@ def slugify(value: str) -> str:
 async def register(payload: RegisterRequest, db: AsyncSession = Depends(get_db)):
     if payload.role not in PUBLIC_ROLES:
         raise HTTPException(status_code=403, detail="This role cannot be self-registered")
-    if payload.role != UserRole.STUDENT and not payload.organization_name:
-        raise HTTPException(status_code=422, detail="organization_name is required for this account type")
+    if payload.role == UserRole.AGENCY_MEMBER and not payload.organization_name:
+        raise HTTPException(status_code=422, detail="organization_name is required for an agency account")
+    if payload.role == UserRole.COMPANY_HR and payload.organization_name:
+        # Company profiles are provisioned by the platform; HR users request membership.
+        payload.organization_name = None
     email = str(payload.email).lower().strip()
     if await db.scalar(select(User.id).where(User.email == email)):
         raise HTTPException(status_code=409, detail="An account with this email already exists")
@@ -36,13 +39,9 @@ async def register(payload: RegisterRequest, db: AsyncSession = Depends(get_db))
         if payload.role == UserRole.STUDENT:
             db.add(Student(user_id=user.id))
         elif payload.role == UserRole.COMPANY_HR:
-            slug = slugify(payload.organization_name or "company")
-            if await db.scalar(select(Company.id).where(Company.slug == slug)):
-                slug = f"{slug}-{str(user.id)[:8]}"
-            tenant = Company(name=payload.organization_name or "Company", slug=slug)
-            db.add(tenant)
-            await db.flush()
-            db.add(CompanyMember(company_id=tenant.id, user_id=user.id, sub_role="OWNER", permissions=["*"]))
+            # Do not let public registration create arbitrary company records.
+            # The user can request to join an existing platform-managed company.
+            pass
         else:
             slug = slugify(payload.organization_name or "agency")
             if await db.scalar(select(Agency.id).where(Agency.slug == slug)):
