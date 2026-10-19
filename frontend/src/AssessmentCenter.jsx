@@ -27,8 +27,12 @@ function StudentAssessments() {
   }
   async function openInvite(id) {
     setError(""); setNotice(""); setSelectedId(id); setDetail(null); setAnswers({}); setAptitudeSubmitted(false); setSubmissions({});
-    try { setDetail(await apiRequest("/assessments/invites/" + id)); }
-    catch (e) { setError(e.message); }
+    try {
+      const result = await apiRequest("/assessments/invites/" + id);
+      setDetail(result);
+      setAptitudeSubmitted(Boolean(result.aptitude_submitted));
+      if (result.attempt_result) setNotice("Latest submitted score: " + result.attempt_result.score + "%");
+    } catch (e) { setError(e.message); }
   }
   useEffect(() => { loadInvites(); }, []);
 
@@ -141,7 +145,7 @@ function StudentAssessments() {
             {!codingComplete && active && <p className="muted">Finish becomes available after each coding question has a completed evaluation result.</p>}
           </section>}
           {detail.status === "SUBMITTED" && detail.final_result && <div className="success-message">Final score: {detail.final_result.score}%</div>}
-          {detail.status === "COMPLETED" && <div className="success-message">This assessment is complete.</div>}
+          {detail.attempt_result && <div className="success-message">Latest submitted score: {detail.attempt_result.score}%</div>}{detail.status === "COMPLETED" && <div className="success-message">This assessment is complete.</div>}
         </>}
       </section>
     </div>
