@@ -240,6 +240,17 @@ class CompanyMember(Timestamped):
     __table_args__ = (UniqueConstraint("company_id", "user_id", name="uq_company_member"),)
 
 
+class CompanyJoinRequest(Timestamped):
+    __tablename__ = "company_join_requests"
+    company_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"), nullable=False, index=True)
+    user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    message: Mapped[str | None] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(String(20), default="PENDING", nullable=False, index=True)
+    reviewed_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"))
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    __table_args__ = (UniqueConstraint("company_id", "user_id", name="uq_company_join_request_user"),)
+
+
 class Invitation(Timestamped):
     __tablename__ = "invitations"
     tenant_type: Mapped[str] = mapped_column(String(30), nullable=False)
