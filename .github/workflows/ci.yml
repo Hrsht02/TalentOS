@@ -21,6 +21,7 @@ jobs:
           cache-dependency-path: backend/requirements.txt
       - run: pip install -r requirements.txt
       - run: python -m compileall -q app migrations
+      - run: python -c "import yaml; config = yaml.safe_load(open('../render.yaml')); assert config['services'] and config['databases']"
       - run: python -m pytest -q
 
   frontend:
