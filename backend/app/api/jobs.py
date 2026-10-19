@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 from uuid import UUID
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import get_current_user, require_roles
@@ -299,3 +299,62 @@ async def change_application_status(
                     resource_id=str(application.id), details={"from": old_status.value, "to": new_status.value, "reason": reason}))
     await db.commit()
     return {"application_id": str(application.id), "status": new_status.value}
+
+
+
+@router.get("/{job_id}/ranking")
+async def get_job_ranking(
+    job_id: UUID,
+    limit: int = Query(default=50, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+    user: User = Depends(require_roles(UserRole.COMPANY_HR)),
+    db: AsyncSession = Depends(get_db),
+):
+    """Return the latest score snapshot; shortlist recommendations are advisory."""
+    from app.models import Ranking, Score, ScoreBreakdown, Shortlist, User as UserModel
+    company_id = await _company_for_user(db, user)
+    job = await db.scalar(select(Job).where(
+        Job.id == job_id, Job.company_id == company_id, Job.deleted_at.is_(None)
+    ))
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    latest_version = select(func.max(Ranking.snapshot_version)).where(
+        Ranking.job_id == job.id
+    ).scalar_subquery()
+    rows = (await db.execute(
+        select(Ranking, Application, Score, Student, UserModel, Shortlist)
+        .join(Application, Application.id == Ranking.application_id)
+        .join(Score, Score.id == Ranking.score_id)
+        .join(Student, Student.id == Application.student_id)
+        .join(UserModel, UserModel.id == Student.user_id)
+        .outerjoin(Shortlist, (Shortlist.application_id == Application.id) & (Shortlist.job_id == job.id))
+        .where(Ranking.job_id == job.id, Ranking.snapshot_version == latest_version)
+        .order_by(Ranking.rank.asc())
+        .offset(offset).limit(limit)
+    )).all()
+    results = []
+    for ranking, application, score, student, candidate_user, shortlist in rows:
+        breakdown = list((await db.scalars(select(ScoreBreakdown).where(
+            ScoreBreakdown.score_id == score.id
+        ).order_by(ScoreBreakdown.criterion.asc()))).all())
+        results.append({
+            "rank": ranking.rank,
+            "snapshot_version": ranking.snapshot_version,
+            "application_id": str(application.id),
+            "student_id": str(student.id),
+            "full_name": candidate_user.full_name,
+            "headline": student.headline,
+            "location": student.location,
+            "graduation_year": student.graduation_year,
+            "application_status": application.status.value,
+            "score": score.total_score,
+            "score_explanation": score.explanation,
+            "score_breakdown": [{
+                "criterion": item.criterion, "score": item.raw_score,
+                "weight": item.weight, "contribution": item.contribution,
+            } for item in breakdown],
+            "shortlist_recommended": shortlist.recommended if shortlist else False,
+            "shortlist_decision": shortlist.decision if shortlist else "NOT_RECOMMENDED",
+        })
+    return {"job_id": str(job.id), "count": len(results),
+            "snapshot_version": rows[0][0].snapshot_version if rows else None, "results": results}
