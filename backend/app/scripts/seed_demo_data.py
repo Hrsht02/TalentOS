@@ -15,7 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.security import hash_password
 from app.db.session import AsyncSessionLocal
 from app.models import (
-    AccountStatus, Company, CompanyMember, Job, JobRequirement, JobStatus,
+    AccountStatus, Company, CompanyJoinRequest, CompanyMember, Job, JobRequirement, JobStatus,
     Student, StudentEducation, StudentProject, StudentSkill, User, UserRole,
 )
 
@@ -200,8 +200,31 @@ async def seed() -> None:
                                         grade=f"{student.cgpa}/10"))
             student_count += 1
 
+        # Approve pending requests from active HR users for companies that have no current membership.
+        pending_requests = (await db.scalars(select(CompanyJoinRequest).where(CompanyJoinRequest.status == "PENDING"))).all()
+        approved_requests = 0
+        for request in pending_requests:
+            applicant = await db.get(User, request.user_id)
+            company = await db.get(Company, request.company_id)
+            if not applicant or applicant.role != UserRole.COMPANY_HR or applicant.status != AccountStatus.ACTIVE or not company or company.suspended:
+                continue
+            existing_membership = await db.scalar(select(CompanyMember).where(
+                CompanyMember.user_id == applicant.id, CompanyMember.active.is_(True)
+            ))
+            if existing_membership:
+                if existing_membership.company_id == company.id:
+                    request.status = "APPROVED"
+                    request.reviewed_at = now
+                    approved_requests += 1
+                continue
+            db.add(CompanyMember(company_id=company.id, user_id=applicant.id, sub_role="HR",
+                                 permissions=["JOBS_READ", "JOBS_WRITE", "CANDIDATES_READ"], active=True))
+            request.status = "APPROVED"
+            request.reviewed_at = now
+            approved_requests += 1
+
         await db.commit()
-        print(f"Demo seed complete: {company_count} companies, {job_count} newly created jobs (4 per company when absent), {hr_count} HR users, {student_count} students.")
+        print(f"Demo seed complete: {company_count} companies, {job_count} newly created jobs (4 per company when absent), {hr_count} HR users, {student_count} students, {approved_requests} pending HR join requests approved.")
         print("All demo accounts require a password change on first login. Password values are intentionally not printed to logs.")
 
 
