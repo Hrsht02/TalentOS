@@ -100,7 +100,14 @@ def match_candidates(self, job_id: str) -> dict[str, object]:
                 processed += 1
                 eligible_count += int(is_eligible)
             await db.commit()
-            return {"status": "completed", "job_id": job_id, "candidates_processed": processed, "eligible_candidates": eligible_count}
+            try:
+                ranking_task = rank_job_applicants.delay(job_id)
+                ranking_task_id = ranking_task.id
+            except Exception as queue_error:
+                logger.warning("Ranking task could not be queued job_id=%s error_type=%s", job_id, type(queue_error).__name__)
+                ranking_task_id = None
+            return {"status": "completed", "job_id": job_id, "candidates_processed": processed,
+                    "eligible_candidates": eligible_count, "ranking_task_id": ranking_task_id}
     try:
         return asyncio.run(run())
     except Exception as exc:
@@ -254,5 +261,168 @@ def evaluate_coding_submission(self, submission_id: str) -> dict[str, object]:
             if self.request.retries < self.max_retries:
                 raise self.retry(exc=exc)
             raise
+    finally:
+        asyncio.run(engine.dispose())
+
+
+@celery_app.task(bind=True, max_retries=2, default_retry_delay=30, name="app.tasks.rank_job_applicants")
+def rank_job_applicants(self, job_id: str) -> dict[str, object]:
+    """Score applicants from available job-related evidence and recommend a review shortlist."""
+    import asyncio
+    import uuid
+    from sqlalchemy import func, select
+    from app.db.session import AsyncSessionLocal, engine
+    from app.models import (
+        Application, Assessment, AssessmentAttempt, AssessmentInvite, Job, JobEvalConfig,
+        JobStatus, Match, Ranking, Resume, Score, ScoreBreakdown, Shortlist, Student,
+        StudentProject, StudentSkill, User,
+    )
+
+    parsed_job_id = uuid.UUID(job_id)
+
+    async def run() -> dict[str, object]:
+        async with AsyncSessionLocal() as db:
+            job = await db.scalar(select(Job).where(
+                Job.id == parsed_job_id, Job.status == JobStatus.PUBLISHED, Job.deleted_at.is_(None)
+            ))
+            if not job:
+                return {"status": "skipped", "reason": "job_not_published"}
+
+            applications = list((await db.scalars(select(Application).where(
+                Application.job_id == job.id, Application.withdrawn_at.is_(None)
+            ))).all())
+            if not applications:
+                return {"status": "completed", "job_id": job_id, "ranked_applicants": 0, "shortlist_recommendations": 0}
+
+            config = await db.scalar(select(JobEvalConfig).where(JobEvalConfig.job_id == job.id))
+            weights = (config.weights if config and config.weights else {
+                "aptitude": 0.20, "coding": 0.30, "skills": 0.20, "projects": 0.10, "resume": 0.20
+            })
+            assessment_types = set((await db.scalars(select(Assessment.assessment_type).where(
+                Assessment.job_id == job.id, Assessment.active.is_(True)
+            ))).all())
+            has_aptitude = any(kind in {"APTITUDE", "MIXED"} for kind in assessment_types)
+            has_coding = any(kind in {"CODING", "MIXED"} for kind in assessment_types)
+
+            students = list((await db.scalars(select(Student).where(
+                Student.id.in_([app.student_id for app in applications])
+            ))).all())
+            student_by_id = {student.id: student for student in students}
+            skills = list((await db.scalars(select(StudentSkill).where(
+                StudentSkill.student_id.in_(list(student_by_id))
+            ))).all())
+            projects = list((await db.scalars(select(StudentProject).where(
+                StudentProject.student_id.in_(list(student_by_id))
+            ))).all())
+            resumes = set((await db.scalars(select(Resume.student_id).where(
+                Resume.student_id.in_(list(student_by_id))
+            ))).all())
+            skills_by_student: dict[uuid.UUID, set[str]] = {}
+            projects_by_student: dict[uuid.UUID, int] = {}
+            for skill in skills:
+                skills_by_student.setdefault(skill.student_id, set()).add(skill.skill.strip().lower())
+            for project in projects:
+                projects_by_student[project.student_id] = projects_by_student.get(project.student_id, 0) + 1
+
+            required_skills = [str(s).strip().lower() for s in (job.requirements or {}).get("skills", []) if str(s).strip()]
+            aptitude_scores: dict[uuid.UUID, list[float]] = {}
+            coding_scores: dict[uuid.UUID, list[float]] = {}
+            for application in applications:
+                rows = (await db.execute(
+                    select(Assessment.assessment_type, AssessmentAttempt.score, AssessmentAttempt.result_summary)
+                    .join(AssessmentInvite, AssessmentInvite.assessment_id == Assessment.id)
+                    .join(AssessmentAttempt, AssessmentAttempt.assessment_invite_id == AssessmentInvite.id)
+                    .where(AssessmentInvite.application_id == application.id,
+                           AssessmentAttempt.status == "SUBMITTED")
+                )).all()
+                for kind, attempt_score, summary in rows:
+                    summary = summary or {}
+                    if kind == "APTITUDE":
+                        value = float(attempt_score or 0)
+                        aptitude_scores.setdefault(application.student_id, []).append(value)
+                    elif kind == "CODING":
+                        value = float(attempt_score or 0)
+                        coding_scores.setdefault(application.student_id, []).append(value)
+                    elif kind == "MIXED":
+                        aptitude_part = summary.get("aptitude")
+                        coding_part = summary.get("coding")
+                        if aptitude_part and aptitude_part.get("score") is not None:
+                            aptitude_scores.setdefault(application.student_id, []).append(float(aptitude_part["score"]))
+                        if coding_part and coding_part.get("score") is not None:
+                            coding_scores.setdefault(application.student_id, []).append(float(coding_part["score"]))
+
+            latest_version = await db.scalar(select(func.max(Ranking.snapshot_version)).where(Ranking.job_id == job.id)) or 0
+            snapshot_version = int(latest_version) + 1
+            scored: list[tuple[Application, float, dict[str, dict[str, float]]]] = []
+            for application in applications:
+                student = student_by_id.get(application.student_id)
+                if not student:
+                    continue
+                student_skills = skills_by_student.get(student.id, set())
+                matched = student_skills.intersection(required_skills)
+                skill_score = (len(matched) / len(set(required_skills)) * 100) if required_skills else min(100.0, len(student_skills) * 10.0)
+                project_count = projects_by_student.get(student.id, 0)
+                project_score = min(project_count, 3) / 3 * 100
+                components: dict[str, dict[str, float]] = {
+                    "skills": {"score": round(skill_score, 2), "weight": float(weights.get("skills", 0.20))},
+                    "projects": {"score": round(project_score, 2), "weight": float(weights.get("projects", 0.10))},
+                }
+                if has_aptitude:
+                    vals = aptitude_scores.get(student.id, [])
+                    components["aptitude"] = {"score": round(sum(vals) / len(vals), 2) if vals else 0.0,
+                                              "weight": float(weights.get("aptitude", 0.20))}
+                if has_coding:
+                    vals = coding_scores.get(student.id, [])
+                    components["coding"] = {"score": round(sum(vals) / len(vals), 2) if vals else 0.0,
+                                            "weight": float(weights.get("coding", 0.30))}
+                if resumes:
+                    components["resume"] = {"score": 100.0 if student.id in resumes else 0.0,
+                                            "weight": float(weights.get("resume", 0.20))}
+                valid = {key: value for key, value in components.items() if value["weight"] > 0}
+                weight_sum = sum(value["weight"] for value in valid.values())
+                total_score = round(sum(value["score"] * value["weight"] for value in valid.values()) / weight_sum, 2) if weight_sum else 0.0
+                scored.append((application, total_score, valid))
+
+            scored.sort(key=lambda item: (-item[1], item[0].created_at))
+            top_count = min(len(scored), max(5, int(job.openings or 1) * 5))
+            recommended_ids = {item[0].id for item in scored[:top_count]}
+            existing_shortlists = {item.application_id: item for item in (await db.scalars(
+                select(Shortlist).where(Shortlist.application_id.in_([app.id for app, _, _ in scored]))
+            )).all()}
+
+            for rank, (application, total_score, components) in enumerate(scored, start=1):
+                score = Score(
+                    application_id=application.id, total_score=total_score, scoring_version="job-rank-v1",
+                    explanation="Job-specific score based on available skills, project, assessment, and resume evidence.",
+                    calculated_from={"snapshot_version": snapshot_version, "weights": {key: val["weight"] for key, val in components.items()}},
+                )
+                db.add(score)
+                await db.flush()
+                for criterion, values in components.items():
+                    db.add(ScoreBreakdown(
+                        score_id=score.id, criterion=criterion, raw_score=values["score"],
+                        weight=values["weight"], contribution=round(values["score"] * values["weight"], 2),
+                        evidence={"source": "profile_or_completed_assessment"},
+                    ))
+                db.add(Ranking(job_id=job.id, application_id=application.id, score_id=score.id,
+                               rank=rank, snapshot_version=snapshot_version))
+                recommended = application.id in recommended_ids
+                shortlist = existing_shortlists.get(application.id)
+                if shortlist:
+                    if shortlist.decision not in {"APPROVED", "REJECTED"}:
+                        shortlist.recommended = recommended
+                        shortlist.decision = "PENDING_REVIEW" if recommended else "NOT_RECOMMENDED"
+                else:
+                    db.add(Shortlist(job_id=job.id, application_id=application.id, recommended=recommended,
+                                     decision="PENDING_REVIEW" if recommended else "NOT_RECOMMENDED"))
+            await db.commit()
+            return {"status": "completed", "job_id": job_id, "ranked_applicants": len(scored),
+                    "snapshot_version": snapshot_version, "shortlist_recommendations": len(recommended_ids)}
+
+    try:
+        return asyncio.run(run())
+    except Exception as exc:
+        logger.warning("Applicant ranking failed job_id=%s error_type=%s", job_id, type(exc).__name__)
+        raise self.retry(exc=exc)
     finally:
         asyncio.run(engine.dispose())
