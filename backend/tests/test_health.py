@@ -15,7 +15,7 @@ def test_docs_are_available_in_development():
 
 
 def test_recruitment_workflow_routes_are_registered():
-    paths = {route.path for route in app.routes}
+    paths = set(app.openapi()["paths"])
     assert "/api/v1/assessments/questions/aptitude" in paths
     assert "/api/v1/assessments/questions/coding" in paths
     assert "/api/v1/assessments/my-invites" in paths
