@@ -1,0 +1,45 @@
+services:
+  - type: web
+    name: talentos-api
+    runtime: python
+    rootDir: backend
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.11
+      - key: ENVIRONMENT
+        value: production
+      - key: DEBUG
+        value: "false"
+      - key: SECRET_KEY
+        generateValue: true
+      - key: DATABASE_URL
+        sync: false
+      - key: REDIS_URL
+        sync: false
+      - key: FRONTEND_URL
+        sync: false
+      - key: CORS_ORIGINS
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: GEMINI_API_KEY_2
+        sync: false
+      - key: XAI_API_KEY
+        sync: false
+      - key: GROK_API_KEY
+        sync: false
+      - key: GEMINI_MODEL
+        value: gemini-2.5-flash
+      - key: GEMINI_MODEL_2
+        value: gemini-2.5-flash
+      - key: XAI_MODEL
+        value: grok-3-mini
+      - key: AI_REQUEST_TIMEOUT_SECONDS
+        value: "20"
+      - key: AI_MAX_RETRIES_PER_PROVIDER
+        value: "1"
+      - key: AI_PROVIDER_COOLDOWN_SECONDS
+        value: "60"
