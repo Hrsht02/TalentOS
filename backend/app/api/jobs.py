@@ -14,6 +14,14 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/jobs", tags=["jobs"])
 
 
+def _queue_ranking(job_id: UUID) -> None:
+    try:
+        from app.worker import celery_app
+        celery_app.send_task("app.tasks.rank_job_applicants", args=[str(job_id)])
+    except Exception as exc:
+        logger.warning("Ranking task could not be queued job_id=%s error_type=%s", job_id, type(exc).__name__)
+
+
 def _queue_matching(job_id: UUID) -> None:
     try:
         from app.worker import celery_app
@@ -131,7 +139,9 @@ async def apply_to_job(
         if existing:
             return existing
         raise HTTPException(status_code=409, detail="Application could not be created")
-    _queue_matching(job.id)
+    # Job publication already calculates matches for all students. Re-rank only
+    # after a new application to avoid queuing a full matching pass per applicant.
+    _queue_ranking(job.id)
     return application
 
 
