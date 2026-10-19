@@ -308,6 +308,8 @@ def rank_job_applicants(self, job_id: str) -> dict[str, object]:
                 Student.id.in_([app.student_id for app in applications])
             ))).all())
             student_by_id = {student.id: student for student in students}
+            matches = list((await db.scalars(select(Match).where(Match.job_id == job.id))).all())
+            match_by_student = {match.student_id: match for match in matches}
             skills = list((await db.scalars(select(StudentSkill).where(
                 StudentSkill.student_id.in_(list(student_by_id))
             ))).all())
