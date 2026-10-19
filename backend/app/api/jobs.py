@@ -1,4 +1,5 @@
 from datetime import datetime, timezone
+import logging
 from uuid import UUID
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from sqlalchemy import func, select
@@ -9,7 +10,17 @@ from app.db.session import get_db
 from app.models import Application, ApplicationStatus, CompanyMember, Job, JobStatus, Student, User, UserRole
 from app.schemas.jobs import ApplicationResponse, JobCreate, JobResponse
 
+logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/jobs", tags=["jobs"])
+
+
+def _queue_matching(job_id: UUID) -> None:
+    try:
+        from app.worker import celery_app
+        celery_app.send_task("app.tasks.match_candidates", args=[str(job_id)])
+    except Exception as exc:
+        # The primary request has already committed; queue outages must not undo it.
+        logger.warning("Matching task could not be queued job_id=%s error_type=%s", job_id, type(exc).__name__)
 
 
 async def _company_for_user(db: AsyncSession, user: User) -> UUID:
@@ -88,6 +99,7 @@ async def publish_job(
     job.published_at = datetime.now(timezone.utc)
     await db.commit()
     await db.refresh(job)
+    _queue_matching(job.id)
     return job
 
 
@@ -119,6 +131,7 @@ async def apply_to_job(
         if existing:
             return existing
         raise HTTPException(status_code=409, detail="Application could not be created")
+    _queue_matching(job.id)
     return application
 
 
