@@ -1,4 +1,8 @@
-const API_BASE = (import.meta.env.VITE_API_BASE_URL || "http://localhost:8000/api/v1").replace(/\/$/, "");
+const configuredApiBase = import.meta.env.VITE_API_BASE_URL || import.meta.env.VITE_API_URL;
+const defaultApiBase = import.meta.env.PROD
+  ? "https://talentos-54k8.onrender.com/api/v1"
+  : "http://localhost:8000/api/v1";
+const API_BASE = (configuredApiBase || defaultApiBase).replace(/\/$/, "");
 
 export async function apiRequest(path, options = {}) {
   const token = localStorage.getItem("talentos_access_token");
