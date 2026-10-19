@@ -25,6 +25,7 @@ class Settings(BaseSettings):
     gemini_model: str = "gemini-2.5-flash"
     gemini_model_2: str = "gemini-2.5-flash"
     xai_api_key: str | None = None
+    grok_api_key: str | None = None  # Alias for deployments that name the xAI key GROK_API_KEY
     xai_model: str = "grok-3-mini"
     ai_request_timeout_seconds: float = 20.0
     ai_max_retries_per_provider: int = 1
