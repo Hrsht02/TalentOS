@@ -355,7 +355,7 @@ def rank_job_applicants(self, job_id: str) -> dict[str, object]:
 
             latest_version = await db.scalar(select(func.max(Ranking.snapshot_version)).where(Ranking.job_id == job.id)) or 0
             snapshot_version = int(latest_version) + 1
-            scored: list[tuple[Application, float, dict[str, dict[str, float]]]] = []
+            scored: list[tuple[Application, float, dict[str, dict[str, float]], bool]] = []
             for application in applications:
                 student = student_by_id.get(application.student_id)
                 if not student:
@@ -383,13 +383,16 @@ def rank_job_applicants(self, job_id: str) -> dict[str, object]:
                 valid = {key: value for key, value in components.items() if value["weight"] > 0}
                 weight_sum = sum(value["weight"] for value in valid.values())
                 total_score = round(sum(value["score"] * value["weight"] for value in valid.values()) / weight_sum, 2) if weight_sum else 0.0
-                scored.append((application, total_score, valid))
+                candidate_match = match_by_student.get(student.id)
+                eligible = candidate_match.eligible if candidate_match else True
+                scored.append((application, total_score, valid, eligible))
 
-            scored.sort(key=lambda item: (-item[1], item[0].created_at))
-            top_count = min(len(scored), max(5, int(job.openings or 1) * 5))
-            recommended_ids = {item[0].id for item in scored[:top_count]}
+            scored.sort(key=lambda item: (-int(item[3]), -item[1], item[0].created_at))
+            eligible_scored = [item for item in scored if item[3]]
+            top_count = min(len(eligible_scored), max(5, int(job.openings or 1) * 5))
+            recommended_ids = {item[0].id for item in eligible_scored[:top_count]}
             existing_shortlists = {item.application_id: item for item in (await db.scalars(
-                select(Shortlist).where(Shortlist.application_id.in_([app.id for app, _, _ in scored]))
+                select(Shortlist).where(Shortlist.application_id.in_([app.id for app, _, _, _ in scored]))
             )).all()}
 
             for rank, (application, total_score, components) in enumerate(scored, start=1):
