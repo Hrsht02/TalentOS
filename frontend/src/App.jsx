@@ -49,6 +49,8 @@ function JobCenter({ user }) {
   const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState(false);
   const [showCreate, setShowCreate] = useState(false);
+  const [selectedMatchJob, setSelectedMatchJob] = useState(null);
+  const [matches, setMatches] = useState([]);
   const employer = user?.role === "COMPANY_HR";
   const [form, setForm] = useState({ title: "", description: "", location: "", employment_type: "Full-time", openings: 1 });
   async function loadJobs() {
@@ -70,6 +72,22 @@ function JobCenter({ user }) {
     try { await apiRequest(`/jobs/${job.id}/publish`, { method: "POST" }); setNotice("Job published successfully."); await loadJobs(); }
     catch (e) { setError(e.message); }
   }
+  async function runMatching(job) {
+    setError(""); setNotice("");
+    try {
+      const result = await apiRequest("/jobs/" + job.id + "/match", { method: "POST" });
+      setSelectedMatchJob(job); setMatches([]);
+      setNotice("Candidate matching queued (task " + result.task_id + "). Select View matches after the worker finishes.");
+    } catch (e) { setError(e.message); }
+  }
+  async function viewMatches(job) {
+    setError(""); setNotice("");
+    try {
+      const result = await apiRequest("/jobs/" + job.id + "/matches?limit=100");
+      setSelectedMatchJob(job); setMatches(result);
+      setNotice("Loaded " + result.length + " candidate match records.");
+    } catch (e) { setError(e.message); }
+  }
   async function apply(job) {
     setError(""); setNotice("");
     try { await apiRequest(`/jobs/${job.id}/apply`, { method: "POST", headers: { "Idempotency-Key": crypto.randomUUID() } }); setNotice(`Application submitted for ${job.title}.`); }
@@ -80,7 +98,8 @@ function JobCenter({ user }) {
     <div className="jobs-toolbar"><div className="jobs-search"><Search size={16}/><input value={query} onChange={(e)=>setQuery(e.target.value)} placeholder="Search job titles"/><button className="secondary-button" onClick={loadJobs}>Search</button></div><span className="jobs-count">{jobs.length} {jobs.length === 1 ? "role" : "roles"}</span></div>
     {error && <div className="error-message jobs-message">{error}</div>}{notice && <div className="success-message jobs-message">{notice}</div>}
     {showCreate && employer && <form className="panel create-job-form" onSubmit={createJob}><div className="panel-heading"><div><h2>New job opening</h2><p>Start with the essentials. You can publish after saving.</p></div></div><div className="form-grid"><label>Job title<input required minLength="3" value={form.title} onChange={(e)=>setForm({...form,title:e.target.value})} placeholder="e.g. Frontend Engineer"/></label><label>Location<input value={form.location} onChange={(e)=>setForm({...form,location:e.target.value})} placeholder="Remote / Patna / Bengaluru"/></label><label>Employment type<select value={form.employment_type} onChange={(e)=>setForm({...form,employment_type:e.target.value})}><option>Full-time</option><option>Internship</option><option>Contract</option><option>Part-time</option></select></label><label>Openings<input type="number" min="1" max="10000" value={form.openings} onChange={(e)=>setForm({...form,openings:e.target.value})}/></label></div><label className="description-label">Job description<textarea required minLength="30" rows="5" value={form.description} onChange={(e)=>setForm({...form,description:e.target.value})} placeholder="Describe the role, responsibilities, and skills required…"/></label><button className="primary-button" disabled={busy}>{busy ? "Saving…" : "Save draft"} <ArrowRight size={15}/></button></form>}
-    <div className="jobs-list">{jobs.map((job)=><article className="job-card" key={job.id}><div className="job-company-icon"><Building2 size={20}/></div><div className="job-main"><div className="job-title-line"><h3>{job.title}</h3><span className={`job-status status-${String(job.status).toLowerCase()}`}>{job.status.replace("_"," ")}</span></div><p className="job-meta">{job.location || "Location not specified"} <span>·</span> {job.employment_type || "Employment type not specified"} <span>·</span> {job.openings} {job.openings === 1 ? "opening" : "openings"}</p><p className="job-description">{job.description}</p><div className="job-tags"><span><CheckCircle2 size={12}/> Employer managed</span><span><Sparkles size={12}/> AI matching planned</span></div></div><div className="job-actions">{employer ? job.status === "DRAFT" || job.status === "PAUSED" ? <button className="primary-button" onClick={()=>publish(job)}>Publish <ArrowUpRight size={14}/></button> : <span className="job-status status-published">Live role</span> : <button className="primary-button" onClick={()=>apply(job)}>Apply now <ArrowRight size={14}/></button>}</div></article>)}
+    <div className="jobs-list">{jobs.map((job)=><article className="job-card" key={job.id}><div className="job-company-icon"><Building2 size={20}/></div><div className="job-main"><div className="job-title-line"><h3>{job.title}</h3><span className={`job-status status-${String(job.status).toLowerCase()}`}>{job.status.replace("_"," ")}</span></div><p className="job-meta">{job.location || "Location not specified"} <span>·</span> {job.employment_type || "Employment type not specified"} <span>·</span> {job.openings} {job.openings === 1 ? "opening" : "openings"}</p><p className="job-description">{job.description}</p><div className="job-tags"><span><CheckCircle2 size={12}/> Employer managed</span><span><Sparkles size={12}/> AI matching planned</span></div></div><div className="job-actions">{employer ? job.status === "DRAFT" || job.status === "PAUSED" ? <button className="primary-button" onClick={()=>publish(job)}>Publish <ArrowUpRight size={14}/></button> : <div className="employer-job-actions"><button className="secondary-button" onClick={()=>viewMatches(job)}>View matches</button><button className="primary-button" onClick={()=>runMatching(job)}><Sparkles size={13}/> Run matching</button></div> : <button className="primary-button" onClick={()=>apply(job)}>Apply now <ArrowRight size={14}/></button>}</div></article>)}
+    {selectedMatchJob && employer && <section className="panel matches-panel"><div className="panel-heading"><div><h2>Candidate matches · {selectedMatchJob.title}</h2><p>Sorted by eligibility and job-related evidence. Review before shortlisting.</p></div><span className="tiny-tag">{matches.length} RESULTS</span></div>{matches.length === 0 ? <p className="profile-empty">No results loaded yet. Run matching and then select View matches again after the worker completes.</p> : <div className="matches-table-wrap"><table className="matches-table"><thead><tr><th>Candidate</th><th>Score</th><th>Eligibility</th><th>Evidence</th><th>Skill gaps</th></tr></thead><tbody>{matches.map(item=><tr key={item.student_id}><td><b>{item.full_name}</b><small>{item.headline || "Headline not added"}{item.location ? " · " + item.location : ""}</small></td><td><span className="match-score">{Math.round(item.score)}%</span></td><td><span className={item.eligible ? "eligibility eligible" : "eligibility review"}>{item.eligible ? "Eligible" : "Review"}</span></td><td>{item.explanation}</td><td>{item.skill_gaps?.length ? item.skill_gaps.join(", ") : "No configured skill gaps"}</td></tr>)}</tbody></table></div>}</section>}
     {jobs.length === 0 && <div className="panel empty-jobs"><span className="empty-icon"><BriefcaseBusiness size={22}/></span><h3>{employer ? "No job openings yet" : "No matching jobs yet"}</h3><p>{employer ? "Create your first draft to start building your hiring pipeline." : "Try another search, or check back as employers publish new roles."}</p>{employer && <button className="primary-button" onClick={()=>setShowCreate(true)}>Create your first job</button>}</div>}</div>
   </div>;
 }
