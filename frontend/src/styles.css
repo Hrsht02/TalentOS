@@ -59,3 +59,54 @@
 .employer-job-actions{display:flex;gap:7px;align-items:center;flex-wrap:wrap;justify-content:flex-end}.employer-job-actions .primary-button{font-size:9px;padding:9px}.employer-job-actions .secondary-button{white-space:nowrap}
 .matches-panel{margin-top:20px}.matches-table-wrap{width:100%;overflow-x:auto}.matches-table{width:100%;border-collapse:collapse;text-align:left;font-size:10px}.matches-table th{font-size:9px;letter-spacing:.4px;text-transform:uppercase;color:#8792a3;background:#f8f9fc;padding:11px 10px;white-space:nowrap}.matches-table td{padding:12px 10px;border-bottom:1px solid #eef1f5;color:#657186;vertical-align:top;line-height:1.6;min-width:100px}.matches-table td:first-child{min-width:150px}.matches-table td:first-child b,.matches-table td:first-child small{display:block}.matches-table td:first-child b{color:#344054;font-size:10px}.matches-table td:first-child small{font-size:9px;color:#929cad;margin-top:3px}.match-score{font:800 13px Manrope,sans-serif;color:#5366d9}.eligibility{font-size:8px;font-weight:700;border-radius:5px;padding:5px 6px;white-space:nowrap}.eligibility.eligible{background:#eaf8f0;color:#32855c}.eligibility.review{background:#fff3e3;color:#b5792d}
 @media(max-width:720px){.employer-job-actions{justify-content:flex-start}.matches-table{min-width:680px}}
+
+
+/* Assessment studio and candidate assessment flow */
+.assessment-view{min-height:70vh}
+.assessment-layout{display:grid;grid-template-columns:minmax(280px,.72fr) minmax(0,1.28fr);gap:17px;align-items:start}
+.assessment-invite-list,.assessment-detail,.assessment-builder{min-width:0}
+.assessment-invite{width:100%;display:flex;align-items:center;gap:10px;text-align:left;border:1px solid #e9edf3;background:#fff;border-radius:9px;padding:12px;margin:8px 0;color:#344054}
+.assessment-invite:hover,.assessment-invite.selected{border-color:#cbd2fb;background:#f8f9ff}
+.assessment-invite-icon{width:34px;height:34px;border-radius:9px;background:#eef0ff;color:#586bd9;display:grid;place-items:center;flex-shrink:0}
+.assessment-invite-copy{display:grid;gap:4px;flex:1;min-width:0}
+.assessment-invite-copy b{font-size:11px;overflow-wrap:anywhere}
+.assessment-invite-copy small{font-size:9px;color:#8993a4;line-height:1.5}
+.assessment-detail>.primary-button,.assessment-section>.primary-button{margin-top:14px}
+.assessment-instructions{background:#f7f8fc;border:1px solid #edf0f5;border-radius:9px;padding:14px;margin:16px 0}
+.assessment-instructions b{font-size:11px;color:#39465b}
+.assessment-instructions p{font-size:10px;color:#7e899b;line-height:1.7;margin:7px 0}
+.assessment-instructions small{font-size:9px;color:#5969d3}
+.assessment-section{margin-top:26px}
+.assessment-question{border:1px solid #e8edf4;border-radius:10px;padding:16px;margin:12px 0;background:#fff}
+.question-number{font-size:9px;letter-spacing:.8px;color:#6776d7;font-weight:800;margin-bottom:9px}
+.assessment-question h3{font:700 13px/1.6 Manrope,sans-serif;color:#263247;margin:0 0 14px}
+.question-options{display:grid;gap:8px}
+.question-option{display:flex;align-items:center;gap:10px;padding:10px;border:1px solid #e8edf4;border-radius:8px;color:#667286;font-size:11px;cursor:pointer}
+.question-option.chosen{border-color:#aeb9f6;background:#f6f7ff;color:#3447b2}
+.question-option input{accent-color:#5668d8}
+.question-option>span{display:grid;place-items:center;width:22px;height:22px;border-radius:6px;background:#f0f2f7;color:#6d788a;font-weight:700;font-size:10px;flex-shrink:0}
+.question-option.chosen>span{background:#e0e5ff;color:#4f61cf}
+.assessment-tool-grid{display:grid;grid-template-columns:minmax(0,1.15fr) minmax(300px,.85fr);gap:17px;align-items:start;margin-top:17px}
+.question-bank-header{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:20px 0 9px;padding-top:14px;border-top:1px solid #eef0f5}
+.question-bank-header>b{display:flex;align-items:center;gap:7px;font-size:11px;color:#384459}
+.assessment-form{display:grid;gap:12px;margin:14px 0 18px}
+.assessment-form label{display:grid;gap:6px;font-size:10px;font-weight:700;color:#4c586d}
+.assessment-form input,.assessment-form select,.assessment-form textarea,.assessment-builder select{width:100%;border:1px solid #dfe5ee;border-radius:8px;padding:10px 11px;outline:none;background:#fff;color:#263246;font:400 11px 'DM Sans',sans-serif}
+.assessment-form input:focus,.assessment-form select:focus,.assessment-form textarea:focus{border-color:#6879e7;box-shadow:0 0 0 3px #6879e719}
+.assessment-form textarea{resize:vertical;line-height:1.6}
+.question-option-inputs{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+.assessment-question-pick-list{display:grid;gap:7px;max-height:420px;overflow:auto}
+.question-pick{display:flex;align-items:flex-start;gap:9px;padding:10px;border:1px solid #e8edf4;border-radius:8px;cursor:pointer}
+.question-pick>input{margin-top:3px;accent-color:#596bd8}
+.question-pick>span{display:grid;gap:5px;flex:1;min-width:0}
+.question-pick b{font-size:10px;color:#3d485d}
+.question-pick small{font-size:9px;line-height:1.5;color:#8791a2;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
+.question-pick em{font-style:normal;font-size:8px;color:#6876d6;background:#f0f2ff;padding:4px 5px;border-radius:4px;white-space:nowrap}
+.assessment-subheading{margin-top:26px;padding-top:18px;border-top:1px solid #edf0f5}
+.coding-statement,.coding-constraints{font-size:11px;line-height:1.7;color:#6f7b8f;white-space:pre-wrap}
+.coding-constraints{background:#f8f9fc;border-radius:7px;padding:10px;font-size:10px}
+.code-editor{width:100%;resize:vertical;min-height:190px;background:#101827;color:#e2e8f0;border:1px solid #263449;border-radius:9px;padding:14px;font:12px/1.65 ui-monospace,SFMono-Regular,Consolas,monospace;tab-size:4}
+.code-actions{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-top:12px}
+.submission-state{font-size:10px;color:#68758b}
+@media(max-width:1000px){.assessment-tool-grid{grid-template-columns:1fr}.assessment-layout{grid-template-columns:1fr}}
+@media(max-width:600px){.assessment-invite{align-items:flex-start;flex-wrap:wrap}.assessment-invite-copy{min-width:calc(100% - 55px)}.assessment-invite>.job-status{margin-left:44px}.question-option-inputs{grid-template-columns:1fr}.assessment-question{padding:12px}}
