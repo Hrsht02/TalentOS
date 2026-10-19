@@ -595,3 +595,24 @@ class ConsentRecord(Timestamped):
     granted: Mapped[bool] = mapped_column(Boolean, nullable=False)
     recorded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+
+class AssessmentAttempt(Timestamped):
+    __tablename__ = "assessment_attempts"
+    assessment_invite_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("assessment_invites.id", ondelete="CASCADE"),
+        nullable=False, index=True
+    )
+    attempt_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    status: Mapped[str] = mapped_column(String(30), default="IN_PROGRESS", nullable=False)
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    submitted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    score: Mapped[float | None] = mapped_column(Float)
+    max_score: Mapped[float | None] = mapped_column(Float)
+    answers: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict, nullable=False)
+    result_summary: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict, nullable=False)
+    __table_args__ = (
+        UniqueConstraint("assessment_invite_id", "attempt_number", name="uq_assessment_attempt_number"),
+        CheckConstraint("attempt_number >= 1", name="ck_assessment_attempt_positive"),
+    )
