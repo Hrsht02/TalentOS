@@ -1,5 +1,5 @@
 from functools import lru_cache
-from pydantic import field_validator
+from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -44,6 +44,19 @@ class Settings(BaseSettings):
             if value.startswith("postgresql://"):
                 return value.replace("postgresql://", "postgresql+asyncpg://", 1)
         return value
+
+    @model_validator(mode="after")
+    def validate_production_settings(self):
+        if self.environment.lower() == "production":
+            if self.debug:
+                raise ValueError("DEBUG must be false in production")
+            if self.secret_key == "change-me-before-deployment" or len(self.secret_key) < 32:
+                raise ValueError("SECRET_KEY must be a unique random value of at least 32 characters in production")
+            if self.admin_seed_password == "@talentos123" or len(self.admin_seed_password) < 16:
+                raise ValueError("Set a unique ADMIN_SEED_PASSWORD of at least 16 characters in production")
+            if "*" in self.cors_origin_list:
+                raise ValueError("Wildcard CORS origins are not allowed in production")
+        return self
 
     @property
     def cors_origin_list(self) -> list[str]:
