@@ -174,3 +174,128 @@ async def get_candidate_matches(
         "skill_gaps": match.skill_gaps,
         "evidence": match.evidence,
     } for match, student, user_row in rows]
+
+
+
+@router.get("/{job_id}/applications")
+async def list_job_applications(
+    job_id: UUID,
+    limit: int = Query(default=50, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+    user: User = Depends(require_roles(UserRole.COMPANY_HR)),
+    db: AsyncSession = Depends(get_db),
+):
+    from app.models import Match, Student, StudentSkill, User as UserModel
+    company_id = await _company_for_user(db, user)
+    job = await db.scalar(select(Job).where(Job.id == job_id, Job.company_id == company_id, Job.deleted_at.is_(None)))
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    query = (
+        select(Application, Student, UserModel, Match)
+        .join(Student, Student.id == Application.student_id)
+        .join(UserModel, UserModel.id == Student.user_id)
+        .outerjoin(Match, (Match.job_id == Application.job_id) & (Match.student_id == Application.student_id))
+        .where(Application.job_id == job.id)
+        .order_by(Match.match_score.desc().nullslast(), Application.created_at.desc())
+        .offset(offset).limit(limit)
+    )
+    rows = (await db.execute(query)).all()
+    results = []
+    for application, student, candidate_user, match in rows:
+        candidate_skills = list((await db.scalars(select(StudentSkill.skill).where(StudentSkill.student_id == student.id))).all())
+        results.append({
+            "application_id": str(application.id),
+            "student_id": str(student.id),
+            "full_name": candidate_user.full_name,
+            "email": candidate_user.email,
+            "headline": student.headline,
+            "location": student.location,
+            "graduation_year": student.graduation_year,
+            "skills": candidate_skills,
+            "status": application.status.value,
+            "applied_at": application.created_at.isoformat(),
+            "match_score": match.match_score if match else None,
+            "match_eligible": match.eligible if match else None,
+            "match_explanation": match.explanation if match else None,
+        })
+    return results
+
+
+@router.post("/applications/{application_id}/shortlist")
+async def approve_shortlist(
+    application_id: UUID,
+    reason: str | None = None,
+    user: User = Depends(require_roles(UserRole.COMPANY_HR)),
+    db: AsyncSession = Depends(get_db),
+):
+    from app.models import AuditLog, Shortlist
+    company_id = await _company_for_user(db, user)
+    query = (
+        select(Application)
+        .join(Job, Job.id == Application.job_id)
+        .where(Application.id == application_id, Job.company_id == company_id, Job.deleted_at.is_(None))
+    )
+    application = await db.scalar(query)
+    if not application:
+        raise HTTPException(status_code=404, detail="Application not found")
+    existing = await db.scalar(select(Shortlist).where(Shortlist.application_id == application.id))
+    if existing:
+        existing.decision = "APPROVED"
+        existing.recommended = True
+        existing.reviewed_by = user.id
+        existing.override_reason = reason
+    else:
+        db.add(Shortlist(job_id=application.job_id, application_id=application.id, recommended=True,
+                         decision="APPROVED", reviewed_by=user.id, override_reason=reason))
+    old_status = application.status.value
+    application.status = ApplicationStatus.SHORTLISTED
+    db.add(AuditLog(actor_user_id=user.id, tenant_type="COMPANY", tenant_id=company_id,
+                    action="APPLICATION_SHORTLISTED", resource_type="APPLICATION",
+                    resource_id=str(application.id), details={"reason": reason}))
+    from app.models import ApplicationStatusHistory
+    db.add(ApplicationStatusHistory(application_id=application.id, old_status=old_status,
+                                    new_status=ApplicationStatus.SHORTLISTED.value, changed_by=user.id,
+                                    reason=reason, event_metadata={"source": "hr_shortlist"}))
+    await db.commit()
+    return {"status": "shortlisted", "application_id": str(application.id), "decision": "APPROVED"}
+
+
+@router.patch("/applications/{application_id}/status")
+async def change_application_status(
+    application_id: UUID,
+    payload: dict,
+    user: User = Depends(require_roles(UserRole.COMPANY_HR)),
+    db: AsyncSession = Depends(get_db),
+):
+    from app.models import ApplicationStatusHistory, AuditLog
+    company_id = await _company_for_user(db, user)
+    application = await db.scalar(
+        select(Application).join(Job, Job.id == Application.job_id).where(
+            Application.id == application_id, Job.company_id == company_id, Job.deleted_at.is_(None)
+        )
+    )
+    if not application:
+        raise HTTPException(status_code=404, detail="Application not found")
+    requested = payload.get("status")
+    allowed = {ApplicationStatus.ASSESSMENT_INVITED, ApplicationStatus.SHORTLISTED,
+               ApplicationStatus.INTERVIEW, ApplicationStatus.OFFER, ApplicationStatus.HIRED,
+               ApplicationStatus.REJECTED}
+    try:
+        new_status = ApplicationStatus(requested)
+    except (ValueError, TypeError):
+        raise HTTPException(status_code=422, detail="Invalid application status")
+    if new_status not in allowed:
+        raise HTTPException(status_code=422, detail="This status cannot be set by the employer endpoint")
+    old_status = application.status
+    if old_status == new_status:
+        return {"application_id": str(application.id), "status": new_status.value}
+    application.status = new_status
+    reason = payload.get("reason")
+    db.add(ApplicationStatusHistory(application_id=application.id, old_status=old_status.value,
+                                    new_status=new_status.value, changed_by=user.id, reason=reason,
+                                    event_metadata={"source": "hr_status_update"}))
+    db.add(AuditLog(actor_user_id=user.id, tenant_type="COMPANY", tenant_id=company_id,
+                    action="APPLICATION_STATUS_CHANGED", resource_type="APPLICATION",
+                    resource_id=str(application.id), details={"from": old_status.value, "to": new_status.value, "reason": reason}))
+    await db.commit()
+    return {"application_id": str(application.id), "status": new_status.value}
