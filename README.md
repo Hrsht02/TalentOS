@@ -165,3 +165,15 @@ The web service and worker share the same database, Redis, AI keys, and signing 
 6. Copy the exact Vercel origin into Render's `FRONTEND_URL` and `CORS_ORIGINS`, then redeploy the API.
 
 The current GitHub Actions workflow runs backend compilation/tests and a Vite production build on pushes to `main`. A green CI run verifies those checks, not that Render/Vercel services are deployed or that third-party credentials work.
+
+
+## Automatic candidate ranking
+
+When an employer publishes a job or a student applies, TalentOS queues candidate matching. The worker then queues a ranking snapshot for the job. Updates to a student's profile, skills, or projects requeue matching for published jobs they have applied to. Completing an aptitude assessment or finalizing a coding/mixed assessment also queues a fresh ranking snapshot.
+
+Ranking uses the job's configured weights for available evidence: aptitude score, coding score, skills coverage, projects, and resume presence. Components for assessment types that have not been configured are excluded and the remaining weights are normalized. Eligibility filters are applied before shortlist recommendations. Candidates who do not meet configured hard eligibility criteria are not recommended for the shortlist.
+
+- `GET /api/v1/jobs/{job_id}/ranking` returns the latest ranking snapshot, score breakdown, eligibility, and shortlist recommendation.
+- `POST /api/v1/jobs/applications/{application_id}/shortlist` is the employer review action. Recommendations remain advisory; recruiters retain the final decision.
+
+The first version uses transparent, rule-based scoring and recorded assessment results rather than a model-only hiring decision. Review weights and eligibility settings for each job before relying on rankings.
