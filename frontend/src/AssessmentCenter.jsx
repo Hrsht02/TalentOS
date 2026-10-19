@@ -11,6 +11,7 @@ function StudentAssessments() {
   const [selectedId, setSelectedId] = useState("");
   const [detail, setDetail] = useState(null);
   const [answers, setAnswers] = useState({});
+  const [aptitudeSubmitted, setAptitudeSubmitted] = useState(false);
   const [code, setCode] = useState({});
   const [languages, setLanguages] = useState({});
   const [submissions, setSubmissions] = useState({});
@@ -25,7 +26,7 @@ function StudentAssessments() {
     catch (e) { setError(e.message); }
   }
   async function openInvite(id) {
-    setError(""); setNotice(""); setSelectedId(id); setDetail(null); setAnswers({}); setSubmissions({});
+    setError(""); setNotice(""); setSelectedId(id); setDetail(null); setAnswers({}); setAptitudeSubmitted(false); setSubmissions({});
     try { setDetail(await apiRequest("/assessments/invites/" + id)); }
     catch (e) { setError(e.message); }
   }
@@ -70,6 +71,7 @@ function StudentAssessments() {
       setNotice(result.status === "aptitude_submitted"
         ? "Aptitude section saved. Submit every coding question, wait for results, then finish the assessment."
         : "Aptitude assessment submitted. Score: " + result.score + "%");
+      setAptitudeSubmitted(true);
       if (result.status === "submitted") setDetail(old => ({ ...old, status: "SUBMITTED" }));
       await loadInvites();
     } catch (e) { setError(e.message); }
@@ -107,6 +109,7 @@ function StudentAssessments() {
 
   const codingQuestions = detail?.coding_questions || [];
   const codingComplete = codingQuestions.length > 0 && codingQuestions.every(q => submissions[q.id]?.result);
+  const canFinish = codingComplete && (detail?.assessment?.assessment_type !== "MIXED" || !detail?.aptitude_questions?.length || aptitudeSubmitted);
   return <div className="assessment-view">
     <div className="welcome-row"><div><p className="eyebrow">YOUR EVALUATION WORKSPACE</p><h1>Assessments<span className="heading-period">.</span></h1><p className="muted">Complete employer-assigned aptitude and coding rounds. Your submitted answers are evaluated against the configured rubric.</p></div><button className="secondary-button" onClick={loadInvites}><RefreshCw size={14}/> Refresh</button></div>
     <Alert error={error} notice={notice}/>
@@ -123,10 +126,10 @@ function StudentAssessments() {
         {detail && <>
           <div className="panel-heading"><div><h2>{detail.assessment.title}</h2><p>{detail.assessment.assessment_type} · {detail.assessment.duration_minutes} minutes · {detail.assessment.max_attempts} maximum attempt(s)</p></div><span className="tiny-tag">{detail.status.replaceAll("_", " ")}</span></div>
           <div className="assessment-instructions"><b>Before you begin</b><p>Starting an attempt begins the time limit. Keep this page open, answer independently, and submit before the deadline. Hidden coding test cases are not shown to candidates.</p><small>Invitation deadline: {new Date(detail.deadline).toLocaleString()}</small></div>
-          {detail.status !== "IN_PROGRESS" && detail.status !== "SUBMITTED" && detail.status !== "COMPLETED" && <button className="primary-button" disabled={busy} onClick={start}>Start assessment <ArrowRight size={15}/></button>}
+          {detail.status !== "IN_PROGRESS" && detail.status !== "SUBMITTED" && detail.status !== "COMPLETED" && detail.status !== "EXPIRED" && detail.status !== "CANCELLED" && <button className="primary-button" disabled={busy} onClick={start}>Start assessment <ArrowRight size={15}/></button>}
           {detail.aptitude_questions?.length > 0 && <section className="assessment-section"><div className="section-heading"><div><h2>Aptitude questions</h2><p>{detail.aptitude_questions.length} questions</p></div></div>
-            {detail.aptitude_questions.map((q, index) => <article className="assessment-question" key={q.id}><div className="question-number">QUESTION {index + 1} · {q.difficulty} · {q.marks} mark(s)</div><h3>{q.prompt}</h3><div className="question-options">{q.options.map(option => <label key={option.id} className={"question-option " + (answers[q.id] === option.id ? "chosen" : "")}><input type="radio" name={q.id} value={option.id} checked={answers[q.id] === option.id} disabled={!active} onChange={() => setAnswers(old => ({ ...old, [q.id]: option.id }))}/><span>{option.id}</span>{option.text}</label>)}</div></article>)}
-            {active && <button className="primary-button" disabled={busy} onClick={submitAptitude}>Submit aptitude answers <Send size={14}/></button>}
+            {detail.aptitude_questions.map((q, index) => <article className="assessment-question" key={q.id}><div className="question-number">QUESTION {index + 1} · {q.difficulty} · {q.marks} mark(s)</div><h3>{q.prompt}</h3><div className="question-options">{q.options.map(option => <label key={option.id} className={"question-option " + (answers[q.id] === option.id ? "chosen" : "")}><input type="radio" name={q.id} value={option.id} checked={answers[q.id] === option.id} disabled={!active || aptitudeSubmitted} onChange={() => setAnswers(old => ({ ...old, [q.id]: option.id }))}/><span>{option.id}</span>{option.text}</label>)}</div></article>)}
+            {active && !aptitudeSubmitted && <button className="primary-button" disabled={busy} onClick={submitAptitude}>Submit aptitude answers <Send size={14}/></button>}{aptitudeSubmitted && <p className="success-message">Aptitude section submitted.</p>}
           </section>}
           {codingQuestions.length > 0 && <section className="assessment-section"><div className="section-heading"><div><h2>Coding challenges</h2><p>Submit each solution for isolated execution against hidden test cases.</p></div></div>
             {codingQuestions.map((q, index) => <article className="assessment-question coding-question" key={q.id}><div className="question-number">CHALLENGE {index + 1} · {q.difficulty}</div><h3>{q.title}</h3><p className="coding-statement">{q.statement}</p>{q.constraints_text && <p className="coding-constraints">{q.constraints_text}</p>}
@@ -134,7 +137,7 @@ function StudentAssessments() {
               <textarea className="code-editor" spellCheck="false" rows="10" disabled={!active} value={code[q.id] ?? q.starter_code?.[languages[q.id] || "python"] ?? ""} onChange={e=>setCode(old=>({...old,[q.id]:e.target.value}))} placeholder="Write your solution here…"/>
               <div className="code-actions"><button className="primary-button" disabled={!active || busy} onClick={()=>submitCode(q)}><Code2 size={14}/> Submit code</button>{submissions[q.id] && <span className="submission-state">{submissions[q.id].status}{submissions[q.id].result ? " · " + submissions[q.id].result.verdict + " · " + submissions[q.id].result.score + "%" : ""}</span>}</div>
             </article>)}
-            {active && <button className="primary-button" disabled={busy || !codingComplete} onClick={finish}>Finish assessment <CheckCircle2 size={15}/></button>}
+            {active && <button className="primary-button" disabled={busy || !canFinish} onClick={finish}>Finish assessment <CheckCircle2 size={15}/></button>}
             {!codingComplete && active && <p className="muted">Finish becomes available after each coding question has a completed evaluation result.</p>}
           </section>}
           {detail.status === "SUBMITTED" && detail.final_result && <div className="success-message">Final score: {detail.final_result.score}%</div>}
