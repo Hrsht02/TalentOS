@@ -1,4 +1,6 @@
 from functools import lru_cache
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+
 from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -42,11 +44,29 @@ class Settings(BaseSettings):
     @field_validator("database_url", mode="before")
     @classmethod
     def normalize_database_url(cls, value):
-        if isinstance(value, str):
-            if value.startswith("postgres://"):
-                return value.replace("postgres://", "postgresql+asyncpg://", 1)
-            if value.startswith("postgresql://"):
-                return value.replace("postgresql://", "postgresql+asyncpg://", 1)
+        if not isinstance(value, str):
+            return value
+
+        if value.startswith("postgres://"):
+            value = value.replace("postgres://", "postgresql+asyncpg://", 1)
+        elif value.startswith("postgresql://"):
+            value = value.replace("postgresql://", "postgresql+asyncpg://", 1)
+
+        # Neon commonly supplies sslmode=require, which is a libpq option.
+        # asyncpg expects the equivalent URL option to be named ssl.
+        if value.startswith("postgresql+asyncpg://"):
+            parts = urlsplit(value)
+            query = [
+                (key, "require" if key == "sslmode" and val == "require" else val)
+                for key, val in parse_qsl(parts.query, keep_blank_values=True)
+                if key != "sslmode"
+            ]
+            original_query = parse_qsl(parts.query, keep_blank_values=True)
+            if any(key == "sslmode" for key, _ in original_query):
+                sslmode = next(val for key, val in original_query if key == "sslmode")
+                if not any(key == "ssl" for key, _ in query):
+                    query.append(("ssl", "require" if sslmode == "require" else sslmode))
+            value = urlunsplit((parts.scheme, parts.netloc, parts.path, urlencode(query), parts.fragment))
         return value
 
     @model_validator(mode="after")
