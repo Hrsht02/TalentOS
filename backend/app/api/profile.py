@@ -115,7 +115,6 @@ async def delete_skill(skill_id: str, user: User = Depends(get_current_user), db
     await db.delete(item)
     await db.commit()
     await _queue_profile_refresh(db, student.id)
-    await _queue_profile_refresh(db, student.id)
 
 
 @router.post("/projects", response_model=ProjectResponse, status_code=201)
@@ -144,3 +143,4 @@ async def delete_project(project_id: str, user: User = Depends(get_current_user)
         raise HTTPException(status_code=404, detail="Project not found")
     await db.delete(item)
     await db.commit()
+    await _queue_profile_refresh(db, student.id)
