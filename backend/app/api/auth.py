@@ -9,7 +9,7 @@ from app.core.config import settings
 from app.core.security import create_access_token, hash_password, verify_password
 from app.db.session import get_db
 from app.models import AccountStatus, Agency, AgencyMember, Company, CompanyMember, Student, User, UserRole
-from app.schemas.auth import LoginRequest, RegisterRequest, TokenResponse, UserResponse
+from app.schemas.auth import ChangePasswordRequest, LoginRequest, RegisterRequest, TokenResponse, UserResponse
 
 router = APIRouter(prefix="/auth", tags=["authentication"])
 PUBLIC_ROLES = {UserRole.STUDENT, UserRole.COMPANY_HR, UserRole.AGENCY_MEMBER}
@@ -78,3 +78,16 @@ async def login(payload: LoginRequest, db: AsyncSession = Depends(get_db)):
 @router.get("/me", response_model=UserResponse)
 async def me(user: User = Depends(get_current_user)):
     return user
+
+
+
+@router.post("/change-password")
+async def change_password(payload: ChangePasswordRequest, user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    if not user.password_hash or not verify_password(payload.current_password, user.password_hash):
+        raise HTTPException(status_code=400, detail="Current password is incorrect")
+    if payload.current_password == payload.new_password:
+        raise HTTPException(status_code=422, detail="New password must be different")
+    user.password_hash = hash_password(payload.new_password)
+    user.must_change_password = False
+    await db.commit()
+    return {"status": "ok", "message": "Password updated"}
