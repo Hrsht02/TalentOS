@@ -1,16 +1,36 @@
 from fastapi import APIRouter, Depends, HTTPException
+import logging
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import get_current_user, require_roles
 from app.db.session import get_db
-from app.models import Student, StudentProject, StudentSkill, User, UserRole
+from app.models import Application, Job, JobStatus, Student, StudentProject, StudentSkill, User, UserRole
 from app.schemas.profile import (
     ProjectCreate, ProjectResponse, SkillCreate, SkillResponse,
     StudentProfileResponse, StudentProfileUpdate,
 )
 
+logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/student/profile", tags=["student profile"], dependencies=[Depends(require_roles(UserRole.STUDENT))])
+
+
+async def _queue_profile_refresh(db: AsyncSession, student_id):
+    """Refresh matching for published jobs the student has already applied to."""
+    job_ids = list((await db.scalars(
+        select(Job.id).join(Application, Application.job_id == Job.id).where(
+            Application.student_id == student_id, Job.status == JobStatus.PUBLISHED, Job.deleted_at.is_(None)
+        ).distinct()
+    )).all())
+    if not job_ids:
+        return
+    try:
+        from app.worker import celery_app
+        for job_id in job_ids:
+            celery_app.send_task("app.tasks.match_candidates", args=[str(job_id)])
+    except Exception as exc:
+        logger.warning("Profile refresh could not be queued student_id=%s error_type=%s",
+                       student_id, type(exc).__name__)
 
 
 async def _student_for_user(db: AsyncSession, user: User) -> Student:
@@ -53,6 +73,7 @@ async def update_profile(payload: StudentProfileUpdate, user: User = Depends(get
     for field, value in payload.model_dump(exclude_unset=True).items():
         setattr(student, field, value)
     await db.commit()
+    await _queue_profile_refresh(db, student.id)
     return await get_profile(user=user, db=db)
 
 
@@ -66,12 +87,14 @@ async def add_skill(payload: SkillCreate, user: User = Depends(get_current_user)
         existing.years_experience = payload.years_experience
         await db.commit()
         await db.refresh(existing)
+        await _queue_profile_refresh(db, student.id)
         return existing
     item = StudentSkill(student_id=student.id, skill=skill_name, proficiency=payload.proficiency, years_experience=payload.years_experience, source="SELF_REPORTED")
     db.add(item)
     try:
         await db.commit()
         await db.refresh(item)
+        await _queue_profile_refresh(db, student.id)
     except IntegrityError:
         await db.rollback()
         raise HTTPException(status_code=409, detail="This skill is already in your profile")
@@ -91,6 +114,8 @@ async def delete_skill(skill_id: str, user: User = Depends(get_current_user), db
         raise HTTPException(status_code=404, detail="Skill not found")
     await db.delete(item)
     await db.commit()
+    await _queue_profile_refresh(db, student.id)
+    await _queue_profile_refresh(db, student.id)
 
 
 @router.post("/projects", response_model=ProjectResponse, status_code=201)
@@ -102,6 +127,7 @@ async def add_project(payload: ProjectCreate, user: User = Depends(get_current_u
     db.add(item)
     await db.commit()
     await db.refresh(item)
+    await _queue_profile_refresh(db, student.id)
     return item
 
 
