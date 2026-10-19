@@ -395,11 +395,11 @@ def rank_job_applicants(self, job_id: str) -> dict[str, object]:
                 select(Shortlist).where(Shortlist.application_id.in_([app.id for app, _, _, _ in scored]))
             )).all()}
 
-            for rank, (application, total_score, components) in enumerate(scored, start=1):
+            for rank, (application, total_score, components, eligible) in enumerate(scored, start=1):
                 score = Score(
                     application_id=application.id, total_score=total_score, scoring_version="job-rank-v1",
                     explanation="Job-specific score based on available skills, project, assessment, and resume evidence.",
-                    calculated_from={"snapshot_version": snapshot_version, "weights": {key: val["weight"] for key, val in components.items()}},
+                    calculated_from={"snapshot_version": snapshot_version, "eligible": eligible, "weights": {key: val["weight"] for key, val in components.items()}},
                 )
                 db.add(score)
                 await db.flush()
