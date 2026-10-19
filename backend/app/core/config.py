@@ -20,6 +20,10 @@ class Settings(BaseSettings):
     db_pool_size: int = 10
     db_max_overflow: int = 10
     redis_url: str = "redis://localhost:6379/0"
+    judge0_api_url: str | None = None
+    judge0_api_key: str | None = None
+    judge0_poll_interval_seconds: float = 1.5
+    judge0_timeout_seconds: int = 45
 
     gemini_api_key: str | None = None
     gemini_api_key_2: str | None = None
