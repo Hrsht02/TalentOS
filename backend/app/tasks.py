@@ -403,10 +403,11 @@ def rank_job_applicants(self, job_id: str) -> dict[str, object]:
                 )
                 db.add(score)
                 await db.flush()
+                normalized_weight_sum = sum(value["weight"] for value in components.values())
                 for criterion, values in components.items():
                     db.add(ScoreBreakdown(
                         score_id=score.id, criterion=criterion, raw_score=values["score"],
-                        weight=values["weight"], contribution=round(values["score"] * values["weight"], 2),
+                        weight=values["weight"], contribution=round(values["score"] * values["weight"] / normalized_weight_sum, 2) if normalized_weight_sum else 0.0,
                         evidence={"source": "profile_or_completed_assessment"},
                     ))
                 db.add(Ranking(job_id=job.id, application_id=application.id, score_id=score.id,
