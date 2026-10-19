@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { Activity, ArrowRight, ArrowUpRight, Bell, BriefcaseBusiness, Building2, CheckCircle2, ChevronDown, CircleHelp, Command, FileText, GraduationCap, LayoutDashboard, LogOut, Search, ShieldCheck, Sparkles, Users, Zap, UserRound, Plus, Trash2, Save } from "lucide-react";
+import { Activity, ArrowRight, ArrowUpRight, Bell, BriefcaseBusiness, Building2, CheckCircle2, ChevronDown, CircleHelp, Command, FileText, GraduationCap, LayoutDashboard, LogOut, Search, ShieldCheck, Sparkles, Users, Zap, UserRound, Plus, Trash2, Save, LockKeyhole } from "lucide-react";
 import { apiRequest, clearSession, saveSession } from "./api";
 
 const initialUser = () => {
@@ -138,7 +138,29 @@ function ProfileCenter() {
   </div>;
 }
 
-function Dashboard({ user, onLogout }) {
+function ChangePasswordPanel({ user, onUpdated }) {
+  const [current, setCurrent] = useState("");
+  const [next, setNext] = useState("");
+  const [confirm, setConfirm] = useState("");
+  const [error, setError] = useState("");
+  const [done, setDone] = useState(false);
+  const [busy, setBusy] = useState(false);
+  async function submit(event) {
+    event.preventDefault(); setError(""); setDone(false);
+    if (next !== confirm) { setError("New passwords do not match."); return; }
+    if (current === next) { setError("Choose a new password different from the current one."); return; }
+    setBusy(true);
+    try {
+      await apiRequest("/auth/change-password", { method:"POST", body:JSON.stringify({current_password:current,new_password:next}) });
+      const updated = {...user, must_change_password:false};
+      localStorage.setItem("talentos_user", JSON.stringify(updated));
+      onUpdated(updated); setCurrent(""); setNext(""); setConfirm(""); setDone(true);
+    } catch(e) { setError(e.message); } finally { setBusy(false); }
+  }
+  return <section className="password-panel"><div className="password-panel-icon"><LockKeyhole size={18}/></div><div className="password-panel-body"><b>Change your temporary password</b><p>This account was created with a temporary password. Set a new one before continuing with admin tasks.</p>{done && <div className="success-message">Password changed successfully.</div>}{error && <div className="error-message">{error}</div>}<form onSubmit={submit} className="password-form"><input required type="password" value={current} onChange={e=>setCurrent(e.target.value)} placeholder="Current password"/><input required minLength="12" type="password" value={next} onChange={e=>setNext(e.target.value)} placeholder="New password (12+ characters)"/><input required minLength="12" type="password" value={confirm} onChange={e=>setConfirm(e.target.value)} placeholder="Confirm new password"/><button className="primary-button" disabled={busy}>{busy ? "Updating…" : "Update password"}</button></form></div></section>;
+}
+
+function Dashboard({ user, onLogout, onUserUpdate }) {
   const [stats, setStats] = useState(null);
   const [status, setStatus] = useState("");
   const [view, setView] = useState("dashboard");
@@ -178,6 +200,7 @@ function Dashboard({ user, onLogout }) {
       <div className="page-content">
         {view === "jobs" ? <JobCenter user={user}/> : view === "profile" && student ? <ProfileCenter/> : <>
         <div className="welcome-row"><div><p className="eyebrow">MONDAY · YOUR WORKSPACE</p><h1>{title}<span className="heading-period">.</span></h1><p className="muted">Hi {user?.full_name?.split(" ")[0] || "there"}, here's what's happening with your workspace.</p></div><div className="date-pill"><Activity size={15}/> Live workspace</div></div>
+        {user?.must_change_password && <ChangePasswordPanel user={user} onUpdated={onUserUpdate}/>}
         <div className="notice-banner"><div className="notice-icon"><Sparkles size={19}/></div><div><b>Your recruitment copilot is being prepared</b><p>TalentOS is designed to handle repetitive recruiting tasks and explain its recommendations. More workflow modules are coming online in phases.</p></div><span className="notice-status"><span/> Foundation</span></div>
         <div className="section-heading"><div><h2>Workspace snapshot</h2><p>Key information at a glance</p></div><button className="secondary-button" onClick={()=>window.location.reload()}>Refresh <Activity size={14}/></button></div>
         <div className="metric-grid">{metricData.map(([label,value,Icon],i)=><div className="metric-card" key={label}><div className="metric-top"><span>{label}</span><span className="metric-icon"><Icon size={17}/></span></div><div className="metric-value">{value}</div><div className="metric-foot">{admin && stats ? "Current platform records" : "Available as modules launch"}</div></div>)}</div>
@@ -196,5 +219,5 @@ export default function App() {
   const navigate = useNavigate();
   function logout() { clearSession(); setUser(null); setMode("login"); navigate("/"); }
   if (!user) return <main className="auth-layout"><div className="auth-decoration"><div className="decoration-grid"/><div className="hero-content"><div className="hero-kicker"><Sparkles size={15}/> INTELLIGENT RECRUITMENT</div><h2>Hire for potential.<br/><span>Move with clarity.</span></h2><p>One connected workspace for candidate discovery, skills assessment, and transparent hiring decisions.</p><div className="hero-proof"><div className="proof-avatars"><span>AK</span><span>RS</span><span>JM</span><span>+</span></div><div><b>Built for modern teams</b><small>Students · Employers · Agencies</small></div></div></div><div className="hero-bottom"><span>TalentOS / Recruitment, reimagined</span><span>Designed for people, powered by AI.</span></div></div><section className="auth-side"><AuthPanel mode={mode} onMode={setMode} onSuccess={setUser}/></section></main>;
-  return <Dashboard user={user} onLogout={logout}/>;
+  return <Dashboard user={user} onLogout={logout} onUserUpdate={setUser}/>;
 }
