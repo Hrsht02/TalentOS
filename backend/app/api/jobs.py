@@ -120,3 +120,57 @@ async def apply_to_job(
             return existing
         raise HTTPException(status_code=409, detail="Application could not be created")
     return application
+
+
+
+@router.post("/{job_id}/match")
+async def queue_candidate_matching(
+    job_id: UUID,
+    user: User = Depends(require_roles(UserRole.COMPANY_HR)),
+    db: AsyncSession = Depends(get_db),
+):
+    from app.worker import celery_app
+    company_id = await _company_for_user(db, user)
+    job = await db.scalar(select(Job).where(Job.id == job_id, Job.company_id == company_id, Job.deleted_at.is_(None)))
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    if job.status != JobStatus.PUBLISHED:
+        raise HTTPException(status_code=409, detail="Publish the job before running candidate matching")
+    task = celery_app.send_task("app.tasks.match_candidates", args=[str(job.id)])
+    return {"status": "queued", "job_id": str(job.id), "task_id": task.id}
+
+
+@router.get("/{job_id}/matches")
+async def get_candidate_matches(
+    job_id: UUID,
+    limit: int = Query(default=50, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+    user: User = Depends(require_roles(UserRole.COMPANY_HR)),
+    db: AsyncSession = Depends(get_db),
+):
+    from app.models import Match, Student, User as UserModel
+    company_id = await _company_for_user(db, user)
+    job = await db.scalar(select(Job).where(Job.id == job_id, Job.company_id == company_id, Job.deleted_at.is_(None)))
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    query = (
+        select(Match, Student, UserModel)
+        .join(Student, Student.id == Match.student_id)
+        .join(UserModel, UserModel.id == Student.user_id)
+        .where(Match.job_id == job.id)
+        .order_by(Match.eligible.desc(), Match.match_score.desc(), Match.created_at.asc())
+        .offset(offset).limit(limit)
+    )
+    rows = (await db.execute(query)).all()
+    return [{
+        "student_id": str(student.id),
+        "full_name": user_row.full_name,
+        "headline": student.headline,
+        "location": student.location,
+        "graduation_year": student.graduation_year,
+        "score": match.match_score,
+        "eligible": match.eligible,
+        "explanation": match.explanation,
+        "skill_gaps": match.skill_gaps,
+        "evidence": match.evidence,
+    } for match, student, user_row in rows]
