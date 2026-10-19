@@ -43,8 +43,9 @@ class AIProviderRouter:
             providers.append(Provider("gemini_primary", settings.gemini_api_key, settings.gemini_model, "gemini"))
         if settings.gemini_api_key_2:
             providers.append(Provider("gemini_secondary", settings.gemini_api_key_2, settings.gemini_model_2, "gemini"))
-        if settings.xai_api_key:
-            providers.append(Provider("xai_grok", settings.xai_api_key, settings.xai_model, "openai_compatible"))
+        grok_key = settings.xai_api_key or settings.grok_api_key
+        if grok_key:
+            providers.append(Provider("xai_grok", grok_key, settings.xai_model, "openai_compatible"))
         return providers
 
     async def _is_cooling_down(self, name: str) -> bool:
@@ -60,10 +61,22 @@ class AIProviderRouter:
             self._cooldowns[name] = time.monotonic() + max(1, settings.ai_provider_cooldown_seconds)
 
     @staticmethod
-    def _should_fail_over(status_code: int | None, error: Exception) -> bool:
-        # Retry/fail over on rate limits, quota exhaustion, transient server errors,
-        # connection failures, and timeouts. Do not loop on ordinary 4xx input errors.
+    def _quota_error(response: httpx.Response | None) -> bool:
+        if response is None:
+            return False
+        body = response.text.lower()
+        return any(term in body for term in (
+            "resource_exhausted", "quota exceeded", "quota_exceeded",
+            "rate limit", "rate_limit", "too many requests",
+        ))
+
+    @classmethod
+    def _should_fail_over(cls, status_code: int | None, error: Exception) -> bool:
+        # Some quota exhaustion responses are HTTP 400/403 with a provider error code.
         if isinstance(error, (httpx.TimeoutException, httpx.TransportError)):
+            return True
+        response = error.response if isinstance(error, httpx.HTTPStatusError) else None
+        if cls._quota_error(response):
             return True
         if status_code in (408, 409, 425, 429) or (status_code is not None and status_code >= 500):
             return True
@@ -156,7 +169,7 @@ class AIProviderRouter:
                         errors.append(message)
                         logger.warning("AI provider failure provider=%s status=%s retryable=%s error_type=%s",
                                        provider.name, status, retryable, type(exc).__name__)
-                        if status == 429 or (status is not None and status >= 500) or isinstance(exc, (httpx.TimeoutException, httpx.TransportError)):
+                        if status == 429 or self._quota_error(response) or (status is not None and status >= 500) or isinstance(exc, (httpx.TimeoutException, httpx.TransportError)):
                             await self._cool_down(provider.name)
                         if not retryable:
                             break
