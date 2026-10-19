@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { Activity, ArrowRight, ArrowUpRight, Bell, BriefcaseBusiness, Building2, CheckCircle2, ChevronDown, CircleHelp, Command, FileText, GraduationCap, LayoutDashboard, LogOut, Search, ShieldCheck, Sparkles, Users, Zap, UserRound, Plus, Trash2, Save, LockKeyhole } from "lucide-react";
 import { apiRequest, clearSession, saveSession } from "./api";
+import AssessmentCenter from "./AssessmentCenter.jsx";
 
 const initialUser = () => {
   try { return JSON.parse(localStorage.getItem("talentos_user") || "null"); } catch { return null; }
@@ -208,16 +209,16 @@ function Dashboard({ user, onLogout, onUserUpdate }) {
         <a className="nav-item"><Users size={17}/> {student ? "My applications" : "Candidates"} <span className="nav-soon">Soon</span></a>
         <a className="nav-item"><Sparkles size={17}/> AI matching <span className="nav-soon">Soon</span></a>
         <p className="nav-caption nav-caption-spaced">MANAGE</p>
-        <a className="nav-item"><FileText size={17}/> Assessments <span className="nav-soon">Soon</span></a>
+        <button className={`nav-item ${view === "assessments" ? "active" : ""}`} onClick={()=>setView("assessments")}><FileText size={17}/> Assessments</button>
         <a className="nav-item"><Activity size={17}/> Analytics <span className="nav-soon">Soon</span></a>
         {admin && <a className="nav-item"><ShieldCheck size={17}/> Administration</a>}
       </nav>
       <div className="sidebar-bottom"><div className="help-card"><CircleHelp size={18}/><div><b>Need a hand?</b><small>Explore the platform guide</small></div><ArrowUpRight size={15}/></div><button className="logout-button" onClick={onLogout}><LogOut size={17}/> Sign out</button></div>
     </aside>
     <main className="main-area">
-      <header className="topbar"><div className="breadcrumbs">Workspace <span>/</span> <b>{view === "jobs" ? "Job openings" : "Dashboard"}</b></div><div className="top-actions"><button className="icon-button" aria-label="Search"><Search size={17}/></button><button className="icon-button" aria-label="Notifications"><Bell size={17}/></button><div className="top-avatar">{(user?.full_name || "T").slice(0,1).toUpperCase()}</div></div></header>
+      <header className="topbar"><div className="breadcrumbs">Workspace <span>/</span> <b>{view === "jobs" ? "Job openings" : view === "profile" ? "My profile" : view === "assessments" ? "Assessments" : "Dashboard"}</b></div><div className="top-actions"><button className="icon-button" aria-label="Search"><Search size={17}/></button><button className="icon-button" aria-label="Notifications"><Bell size={17}/></button><div className="top-avatar">{(user?.full_name || "T").slice(0,1).toUpperCase()}</div></div></header>
       <div className="page-content">
-        {view === "jobs" ? <JobCenter user={user}/> : view === "profile" && student ? <ProfileCenter/> : <>
+        {view === "jobs" ? <JobCenter user={user}/> : view === "profile" && student ? <ProfileCenter/> : view === "assessments" ? <AssessmentCenter user={user}/> : <>
         <div className="welcome-row"><div><p className="eyebrow">MONDAY · YOUR WORKSPACE</p><h1>{title}<span className="heading-period">.</span></h1><p className="muted">Hi {user?.full_name?.split(" ")[0] || "there"}, here's what's happening with your workspace.</p></div><div className="date-pill"><Activity size={15}/> Live workspace</div></div>
         {user?.must_change_password && <ChangePasswordPanel user={user} onUpdated={onUserUpdate}/>}
         <div className="notice-banner"><div className="notice-icon"><Sparkles size={19}/></div><div><b>Your recruitment copilot is being prepared</b><p>TalentOS is designed to handle repetitive recruiting tasks and explain its recommendations. More workflow modules are coming online in phases.</p></div><span className="notice-status"><span/> Foundation</span></div>
