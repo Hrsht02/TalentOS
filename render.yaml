@@ -63,7 +63,7 @@ services:
     plan: starter
     rootDir: backend
     buildCommand: pip install -r requirements.txt
-    startCommand: celery -A app.worker.celery_app worker --loglevel=info --concurrency=2
+    startCommand: celery -A app.worker.celery_app worker --beat --loglevel=info --concurrency=2
     envVars:
       - key: ENVIRONMENT
         value: production
