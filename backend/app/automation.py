@@ -8,7 +8,6 @@ import asyncio
 import logging
 from datetime import datetime, timedelta, timezone
 
-from celery import shared_task
 from sqlalchemy import func, select
 
 from app.worker import celery_app
@@ -118,11 +117,17 @@ def run_recruitment_automation(self) -> dict[str, int]:
 
     try:
         asyncio.run(run())
+        # Run these tasks inline so the scheduled GitHub Actions runner can
+        # execute automation without a permanently running Celery worker.
+        # Celery's apply() executes locally and does not contact the broker.
+        from app.tasks import match_candidates, rank_job_applicants
         for job_id in dict.fromkeys(match_job_ids):
-            celery_app.send_task("app.tasks.match_candidates", args=[job_id])
+            result = match_candidates.apply(args=[job_id], throw=True)
+            result.get()
             counts["matching_queued"] += 1
         for job_id in dict.fromkeys(rank_job_ids):
-            celery_app.send_task("app.tasks.rank_job_applicants", args=[job_id])
+            result = rank_job_applicants.apply(args=[job_id], throw=True)
+            result.get()
             counts["ranking_queued"] += 1
         logger.info("Recruitment automation pass complete counts=%s", counts)
         return counts
