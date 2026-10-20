@@ -4,6 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import require_roles
 from app.db.session import get_db
 from app.models import AccountStatus, Application, Company, Job, Student, User, UserRole
+from fastapi import HTTPException
 
 router = APIRouter(prefix="/admin", tags=["admin"], dependencies=[Depends(require_roles(UserRole.ADMIN))])
 
@@ -21,3 +22,15 @@ async def overview(db: AsyncSession = Depends(get_db)):
         "applications": await count(Application),
         "suspended_users": await count(User, User.status == AccountStatus.SUSPENDED),
     }
+
+
+
+@router.post("/automation/run", status_code=202)
+async def trigger_automation():
+    """Queue one admin-requested automation pass."""
+    try:
+        from app.automation import run_recruitment_automation
+        task = run_recruitment_automation.delay()
+        return {"status": "queued", "task_id": task.id, "message": "Recruitment automation queued. Check worker logs for the result."}
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="Automation queue is unavailable. Check the Render worker and Redis connection.") from exc
