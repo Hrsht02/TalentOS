@@ -308,6 +308,14 @@ function Dashboard({ user, onLogout, onUserUpdate }) {
   useEffect(() => { loadAdminStats(); }, [user?.id, user?.role]);
   const admin = user?.role === "ADMIN";
   const student = user?.role === "STUDENT";
+  async function runAutomationNow() {
+    setAutomationBusy(true); setAutomationMessage("");
+    try {
+      const result = await apiRequest("/admin/automation/run", { method: "POST" });
+      setAutomationMessage("Automation queued successfully. Task ID: " + result.task_id + ". The Render worker must be running.");
+    } catch (e) { setAutomationMessage(e.message || "Could not queue automation."); }
+    finally { setAutomationBusy(false); }
+  }
   const title = admin ? "Platform overview" : student ? "Your career dashboard" : "Recruitment workspace";
   const metricData = admin ? [
     ["Total users", stats ? stats.users : "—", Users], ["Students", stats ? stats.students : "—", GraduationCap], ["Companies", stats ? stats.companies : "—", Building2], ["Jobs", stats ? stats.jobs : "—", BriefcaseBusiness]
@@ -324,6 +332,7 @@ function Dashboard({ user, onLogout, onUserUpdate }) {
       <nav className="side-nav">
         <p className="nav-caption">OVERVIEW</p><button className={`nav-item ${view === "dashboard" ? "active" : ""}`} onClick={()=>setView("dashboard")}><LayoutDashboard size={17}/> Dashboard</button>
         <button className={`nav-item ${view === "jobs" ? "active" : ""}`} onClick={()=>setView("jobs")}><BriefcaseBusiness size={17}/> {student ? "Explore jobs" : "Job openings"}</button>
+        <button className={`nav-item ${view === "notifications" ? "active" : ""}`} onClick={()=>setView("notifications")}><Bell size={17}/> Notifications</button>
         {user?.role === "COMPANY_HR" && <button className={`nav-item ${view === "company" ? "active" : ""}`} onClick={()=>setView("company")}><Building2 size={17}/> Company & team</button>}
         {student && <button className={`nav-item ${view === "profile" ? "active" : ""}`} onClick={()=>setView("profile")}><UserRound size={17}/> My profile</button>}
         <a className="nav-item"><Users size={17}/> {student ? "My applications" : "Candidates"} <span className="nav-soon">Soon</span></a>
@@ -336,10 +345,10 @@ function Dashboard({ user, onLogout, onUserUpdate }) {
       <div className="sidebar-bottom"><div className="help-card"><CircleHelp size={18}/><div><b>Need a hand?</b><small>Explore the platform guide</small></div><ArrowUpRight size={15}/></div><button className="logout-button" onClick={onLogout}><LogOut size={17}/> Sign out</button></div>
     </aside>
     <main className="main-area">
-      <header className="topbar"><div className="breadcrumbs">Workspace <span>/</span> <b>{view === "jobs" ? "Job openings" : view === "profile" ? "My profile" : view === "assessments" ? "Assessments" : "Dashboard"}</b></div><div className="top-actions"><button className="icon-button" aria-label="Search"><Search size={17}/></button><button className="icon-button" aria-label="Notifications"><Bell size={17}/></button><div className="top-avatar">{(user?.full_name || "T").slice(0,1).toUpperCase()}</div></div></header>
+      <header className="topbar"><div className="breadcrumbs">Workspace <span>/</span> <b>{view === "jobs" ? "Job openings" : view === "profile" ? "My profile" : view === "assessments" ? "Assessments" : "Dashboard"}</b></div><div className="top-actions"><button className="icon-button" aria-label="Search"><Search size={17}/></button><button className="icon-button" aria-label="Notifications" onClick={()=>setView("notifications")}><Bell size={17}/></button><div className="top-avatar">{(user?.full_name || "T").slice(0,1).toUpperCase()}</div></div></header>
       <div className="page-content">
         {user?.must_change_password && <ChangePasswordPanel user={user} onUpdated={onUserUpdate}/>}
-        {view === "jobs" ? <JobCenter user={user}/> : view === "company" && user?.role === "COMPANY_HR" ? <CompanyCenter user={user} onGoJobs={()=>setView("jobs")}/> : view === "admin-companies" && admin ? <AdminCompaniesCenter/> : view === "profile" && student ? <ProfileCenter/> : view === "assessments" ? <AssessmentCenter user={user}/> : <>
+        {view === "notifications" ? <NotificationsCenter/> : view === "jobs" ? <JobCenter user={user}/> : view === "company" && user?.role === "COMPANY_HR" ? <CompanyCenter user={user} onGoJobs={()=>setView("jobs")}/> : view === "admin-companies" && admin ? <AdminCompaniesCenter/> : view === "profile" && student ? <ProfileCenter/> : view === "assessments" ? <AssessmentCenter user={user}/> : <>
         <div className="welcome-row"><div><p className="eyebrow">MONDAY · YOUR WORKSPACE</p><h1>{title}<span className="heading-period">.</span></h1><p className="muted">Hi {user?.full_name?.split(" ")[0] || "there"}, here's what's happening with your workspace.</p></div><div className="date-pill"><Activity size={15}/> Live workspace</div></div>
         <div className="notice-banner"><div className="notice-icon"><Sparkles size={19}/></div><div><b>Your recruitment copilot is being prepared</b><p>TalentOS is designed to handle repetitive recruiting tasks and explain its recommendations. More workflow modules are coming online in phases.</p></div><span className="notice-status"><span/> Foundation</span></div>
         <div className="section-heading"><div><h2>Workspace snapshot</h2><p>Key information at a glance</p></div><button className="secondary-button" onClick={admin ? loadAdminStats : ()=>window.location.reload()}>Refresh <Activity size={14}/></button></div>
