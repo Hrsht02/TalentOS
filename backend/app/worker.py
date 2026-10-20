@@ -6,7 +6,7 @@ celery_app = Celery(
     "talentos",
     broker=settings.redis_url,
     backend=settings.redis_url,
-    include=["app.tasks"],
+    include=["app.tasks", "app.automation"],
 )
 celery_app.conf.update(
     task_serializer="json",
@@ -19,4 +19,10 @@ celery_app.conf.update(
     task_soft_time_limit=90,
     task_time_limit=120,
     broker_connection_retry_on_startup=True,
+    beat_schedule={
+        "talentos-recruitment-automation-every-15-minutes": {
+            "task": "app.automation.run_recruitment_automation",
+            "schedule": 900.0,
+        },
+    },
 )
