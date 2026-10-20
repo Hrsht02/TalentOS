@@ -54,12 +54,12 @@ def run_recruitment_automation(self) -> dict[str, int]:
                 counts["invites_expired"] += 1
                 application = await db.get(Application, invite.application_id)
                 if application:
+                    student_user_id = await db.scalar(select(Student.user_id).where(Student.id == application.student_id))
                     existing = await db.scalar(select(Notification.id).where(
-                        Notification.user_id == application.student_id,
+                        Notification.user_id == student_user_id,
                         Notification.kind == "ASSESSMENT_EXPIRED",
                         Notification.payload["assessment_invite_id"].astext == str(invite.id),
-                    ).limit(1))
-                    student_user_id = await db.scalar(select(Student.user_id).where(Student.id == application.student_id))
+                    ).limit(1)) if student_user_id else None
                     if student_user_id and not existing:
                         db.add(Notification(
                             user_id=student_user_id, kind="ASSESSMENT_EXPIRED",
@@ -103,7 +103,7 @@ def run_recruitment_automation(self) -> dict[str, int]:
             ))).all())
             stale_before = now - timedelta(hours=24)
             for job in published_jobs:
-                latest_match = await db.scalar(select(func.max(Match.created_at)).where(Match.job_id == job.id))
+                latest_match = await db.scalar(select(func.max(Match.updated_at)).where(Match.job_id == job.id))
                 if latest_match is None or latest_match < stale_before:
                     match_job_ids.append(str(job.id))
                 application_count = await db.scalar(select(func.count()).select_from(Application).where(
