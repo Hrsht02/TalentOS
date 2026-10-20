@@ -30,7 +30,7 @@ async def trigger_automation():
     """Queue one admin-requested automation pass."""
     try:
         from app.automation import run_recruitment_automation
-        task = run_recruitment_automation.delay()
-        return {"status": "queued", "task_id": task.id, "message": "Recruitment automation queued. Check worker logs for the result."}
+        result = run_recruitment_automation.apply(throw=True)
+        return {"status": "completed", "result": result.get(), "message": "Recruitment automation completed inline."}
     except Exception as exc:
-        raise HTTPException(status_code=503, detail="Automation queue is unavailable. Check the Render worker and Redis connection.") from exc
+        raise HTTPException(status_code=500, detail="Recruitment automation failed. Check the Render API logs for details.") from exc
