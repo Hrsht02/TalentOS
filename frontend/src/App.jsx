@@ -3,6 +3,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { Activity, ArrowRight, ArrowUpRight, Bell, BriefcaseBusiness, Building2, CheckCircle2, ChevronDown, CircleHelp, Command, FileText, GraduationCap, LayoutDashboard, LogOut, Search, ShieldCheck, Sparkles, Users, Zap, UserRound, Plus, Trash2, Save, LockKeyhole } from "lucide-react";
 import { apiRequest, clearSession, saveSession } from "./api";
 import AssessmentCenter from "./AssessmentCenter.jsx";
+import NotificationsCenter from "./NotificationsCenter.jsx";
 
 const initialUser = () => {
   try { return JSON.parse(localStorage.getItem("talentos_user") || "null"); } catch { return null; }
@@ -296,6 +297,8 @@ function Dashboard({ user, onLogout, onUserUpdate }) {
   const [stats, setStats] = useState(null);
   const [status, setStatus] = useState("");
   const [view, setView] = useState(user?.role === "COMPANY_HR" ? "company" : "dashboard");
+  const [automationBusy, setAutomationBusy] = useState(false);
+  const [automationMessage, setAutomationMessage] = useState("");
   useEffect(() => {
     if (user?.role === "ADMIN") apiRequest("/admin/overview").then(setStats).catch((e)=>setStatus(e.message));
   }, [user]);
