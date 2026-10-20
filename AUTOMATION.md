@@ -1,37 +1,43 @@
 # TalentOS recruitment automation
 
-## What runs automatically
+## Scheduled runner (no paid Render worker required)
 
-The Celery worker now loads `app.automation` and includes a Celery Beat schedule every 15 minutes. The periodic pass:
+The repository includes a GitHub Actions workflow at `.github/workflows/scheduled-automation.yml`. It runs every 15 minutes and can also be started manually from GitHub Actions. It connects directly to Neon and runs the automation and stale matching/ranking task bodies inline; it does not require a continuously running Render background worker or Redis queue for this scheduled workflow.
 
-- Closes published jobs after their deadline.
-- Marks assessment invites expired after their deadline.
-- Creates an in-app notification for an expired assessment.
-- Creates an in-app reminder roughly 24 hours before a scheduled interview.
-- Re-queues stale candidate matching for published jobs (at most daily per job based on match update timestamps).
-- Re-queues ranking refreshes for published jobs that have applications (at most daily per job based on ranking snapshot timestamps).
+### Required GitHub Actions secrets
 
-Job publication and application/assessment changes also use existing event-triggered matching and ranking tasks. Candidate matching is based on profile evidence and configured eligibility. Ranking generates recommendations; it does not automatically reject candidates, approve a shortlist, or make a hiring decision.
+Open GitHub → `Hrsht02/TalentOS` → Settings → Secrets and variables → Actions → New repository secret.
 
-## Deployment requirements
+- `NEON_DATABASE_URL`: Neon connection string for the same project, branch, and database used by the Render API. Use the connection string format supported by the app (the settings normalizer converts `postgresql://` to asyncpg format).
+- `TALENTOS_SECRET_KEY`: the same strong random secret used as `SECRET_KEY` in Render. Do not commit either value to the repository.
 
-1. Render API must have the correct Neon `DATABASE_URL`.
-2. Render worker must have the same `DATABASE_URL` and a working `REDIS_URL`.
-3. The worker process must run Celery Beat. For the Render worker Start Command, use:
+The runner checks that the database secret is present and does not point to localhost before starting. Never put database credentials in workflow YAML, source code, or logs.
 
-   ```bash
-   celery -A app.worker.celery_app worker --beat --loglevel=info --concurrency=2
-   ```
+### Run it
 
-   If the worker is already managed through the dashboard rather than a Blueprint, changing `render.yaml` alone does not change its current Start Command; update the service settings manually.
-4. Deploy the backend commit, then deploy the frontend commit on Vercel.
-5. As the platform administrator, use **Run automation now** on the dashboard to queue a one-off pass. Check Render worker logs to confirm completion.
-6. Open **Notifications** from the sidebar or bell to view and mark in-app notifications as read.
+1. Add both repository secrets.
+2. Open GitHub → Actions → **TalentOS Scheduled Automation**.
+3. Select **Run workflow** to test immediately.
+4. Open the run and inspect its logs for `TALENTOS_AUTOMATION_RESULT=` and the counts.
+5. The workflow also runs every 15 minutes. GitHub scheduled jobs use UTC and may start later than the exact minute during periods of load; manual dispatch is available for testing.
+
+The API admin endpoint can also run the automation inline. This can take time on a large database and may be subject to HTTP request timeouts, so the scheduled workflow is preferred.
+
+## What the automation does
+
+- Closes published jobs after their deadlines.
+- Marks assessment invites expired after their deadlines.
+- Creates in-app notifications for expired assessments.
+- Creates in-app reminders approximately 24 hours before scheduled interviews.
+- Refreshes stale matching for published jobs.
+- Refreshes ranking for published jobs with applications.
+
+Matching and ranking run inline in the GitHub Actions runner, rather than being queued for a Celery worker. The workflow therefore does not rely on Render Redis for its scheduled execution. Other app features that still enqueue Celery tasks through Redis will not run unless a worker is available; those need to be adapted to inline execution or a separately hosted worker.
 
 ## Current boundaries
 
-- The automation is in-app; it does not send email/SMS/push notifications without a configured delivery provider.
+- Notifications are stored in-app; no email/SMS/push delivery provider is configured.
 - Interview reminders require an interview record already scheduled in TalentOS.
-- Auto-apply is intentionally not enabled. TalentOS must not submit applications without candidate authorization.
-- Human HR/company users retain control over final shortlist approval, interviews, offers and hiring decisions.
-- This scheduler is designed for a single Celery Beat instance. Do not run multiple beat schedulers against the same queue without configuring a distributed scheduler/lock.
+- Candidate applications are not submitted automatically without candidate authorization.
+- Matching/ranking provides recommendations; final shortlisting, interviews, offers, and hiring decisions remain under human control.
+- The workflow is guarded by GitHub Actions concurrency to prevent overlapping scheduled runs.
