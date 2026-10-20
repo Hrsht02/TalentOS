@@ -299,14 +299,18 @@ function Dashboard({ user, onLogout, onUserUpdate }) {
   const [view, setView] = useState(user?.role === "COMPANY_HR" ? "company" : "dashboard");
   const [automationBusy, setAutomationBusy] = useState(false);
   const [automationMessage, setAutomationMessage] = useState("");
-  useEffect(() => {
-    if (user?.role === "ADMIN") apiRequest("/admin/overview").then(setStats).catch((e)=>setStatus(e.message));
-  }, [user]);
+  async function loadAdminStats() {
+    if (user?.role !== "ADMIN") return;
+    setStatus("");
+    try { setStats(await apiRequest("/admin/overview")); }
+    catch (e) { setStats(null); setStatus(e.message || "Could not load platform statistics."); }
+  }
+  useEffect(() => { loadAdminStats(); }, [user?.id, user?.role]);
   const admin = user?.role === "ADMIN";
   const student = user?.role === "STUDENT";
   const title = admin ? "Platform overview" : student ? "Your career dashboard" : "Recruitment workspace";
-  const metricData = admin && stats ? [
-    ["Total users", stats.users, Users], ["Students", stats.students, GraduationCap], ["Companies", stats.companies, Building2], ["Open opportunities", stats.jobs, BriefcaseBusiness]
+  const metricData = admin ? [
+    ["Total users", stats ? stats.users : "—", Users], ["Students", stats ? stats.students : "—", GraduationCap], ["Companies", stats ? stats.companies : "—", Building2], ["Jobs", stats ? stats.jobs : "—", BriefcaseBusiness]
   ] : student ? [
     ["Profile strength", "Get started", GraduationCap], ["Recommended roles", "Coming next", Sparkles], ["Applications", "0", FileText], ["Assessments", "0", CheckCircle2]
   ] : [
@@ -338,7 +342,7 @@ function Dashboard({ user, onLogout, onUserUpdate }) {
         {view === "jobs" ? <JobCenter user={user}/> : view === "company" && user?.role === "COMPANY_HR" ? <CompanyCenter user={user} onGoJobs={()=>setView("jobs")}/> : view === "admin-companies" && admin ? <AdminCompaniesCenter/> : view === "profile" && student ? <ProfileCenter/> : view === "assessments" ? <AssessmentCenter user={user}/> : <>
         <div className="welcome-row"><div><p className="eyebrow">MONDAY · YOUR WORKSPACE</p><h1>{title}<span className="heading-period">.</span></h1><p className="muted">Hi {user?.full_name?.split(" ")[0] || "there"}, here's what's happening with your workspace.</p></div><div className="date-pill"><Activity size={15}/> Live workspace</div></div>
         <div className="notice-banner"><div className="notice-icon"><Sparkles size={19}/></div><div><b>Your recruitment copilot is being prepared</b><p>TalentOS is designed to handle repetitive recruiting tasks and explain its recommendations. More workflow modules are coming online in phases.</p></div><span className="notice-status"><span/> Foundation</span></div>
-        <div className="section-heading"><div><h2>Workspace snapshot</h2><p>Key information at a glance</p></div><button className="secondary-button" onClick={()=>window.location.reload()}>Refresh <Activity size={14}/></button></div>
+        <div className="section-heading"><div><h2>Workspace snapshot</h2><p>Key information at a glance</p></div><button className="secondary-button" onClick={admin ? loadAdminStats : ()=>window.location.reload()}>Refresh <Activity size={14}/></button></div>
         <div className="metric-grid">{metricData.map(([label,value,Icon],i)=><div className="metric-card" key={label}><div className="metric-top"><span>{label}</span><span className="metric-icon"><Icon size={17}/></span></div><div className="metric-value">{value}</div><div className="metric-foot">{admin && stats ? "Current platform records" : "Available as modules launch"}</div></div>)}</div>
         {status && <div className="error-message">{status}. Check that the API is running and your account has permission.</div>}
         <div className="content-grid"><section className="panel"><div className="panel-heading"><div><h2>Next steps</h2><p>Get your workspace ready</p></div><span className="tiny-tag">GETTING STARTED</span></div><div className="step-row"><span className="step-number done"><CheckCircle2 size={17}/></span><div><b>Account created</b><p>Your account is ready to use.</p></div><span className="step-state">Complete</span></div><div className="step-row"><span className="step-number"><GraduationCap size={17}/></span><div><b>Complete your profile</b><p>Add your skills, experience, and projects.</p></div><span className="step-state pending">Next</span></div><div className="step-row"><span className="step-number"><Zap size={17}/></span><div><b>Enable smart matching</b><p>AI-powered job matching will be available in a later phase.</p></div><span className="step-state pending">Planned</span></div></section><section className="panel activity-panel"><div className="panel-heading"><div><h2>Recent activity</h2><p>Updates from your workspace</p></div></div><div className="empty-activity"><span className="empty-icon"><Activity size={22}/></span><b>You're all caught up</b><p>New activity will appear here as you use TalentOS.</p></div></section></div>
