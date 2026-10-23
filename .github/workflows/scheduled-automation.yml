@@ -1,3 +1,39 @@
+
+name: TalentOS Scheduled Automation
+
+on:
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: talentos-scheduled-automation
+  cancel-in-progress: false
+
+jobs:
+  run-automation:
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 25
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install backend dependencies
+        run: pip install -r requirements.txt
+        working-directory: backend
+
       - name: Check database secret configuration
         env:
           DATABASE_URL: ${{ secrets.NEON_DATABASE_URL }}
@@ -20,3 +56,14 @@
               print("Database path present:", bool(parsed.path.strip("/")))
               print("Localhost:", parsed.hostname in ("localhost", "127.0.0.1"))
           PY
+
+      - name: Run periodic recruitment automation
+        env:
+          ENVIRONMENT: development
+          DEBUG: "false"
+          DATABASE_URL: ${{ secrets.NEON_DATABASE_URL }}
+          SECRET_KEY: ${{ secrets.TALENTOS_SECRET_KEY }}
+          AI_REQUEST_TIMEOUT_SECONDS: "20"
+          AI_MAX_RETRIES_PER_PROVIDER: "1"
+        run: python -m app.scripts.run_automation
+        working-directory: backend
