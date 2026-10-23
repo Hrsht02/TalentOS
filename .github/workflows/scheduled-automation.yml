@@ -1,22 +1,22 @@
       - name: Check database secret configuration
         env:
           DATABASE_URL: ${{ secrets.NEON_DATABASE_URL }}
+          SECRET_KEY: ${{ secrets.TALENTOS_SECRET_KEY }}
         run: |
           python - <<'PY'
           import os
           from urllib.parse import urlparse
 
           value = os.getenv("DATABASE_URL", "").strip()
-          if not value:
-              print("FAIL: DATABASE_URL is empty or unavailable.")
-          else:
+          key = os.getenv("SECRET_KEY", "").strip()
+
+          print("DATABASE_URL present:", bool(value))
+          print("SECRET_KEY present:", bool(key))
+
+          if value:
               parsed = urlparse(value)
-              print("Secret is present.")
               print("Scheme:", parsed.scheme or "missing")
               print("Hostname present:", bool(parsed.hostname))
               print("Database path present:", bool(parsed.path.strip("/")))
-              print(
-                  "Localhost:",
-                  parsed.hostname in ("localhost", "127.0.0.1")
-              )
+              print("Localhost:", parsed.hostname in ("localhost", "127.0.0.1"))
           PY
