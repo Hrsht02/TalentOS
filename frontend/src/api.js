@@ -2,7 +2,15 @@ const configuredApiBase = import.meta.env.VITE_API_BASE_URL || import.meta.env.V
 const defaultApiBase = import.meta.env.PROD
   ? "https://talentos-54k8.onrender.com/api/v1"
   : "http://localhost:8000/api/v1";
-const API_BASE = (configuredApiBase || defaultApiBase).replace(/\/$/, "");
+function normalizeApiBase(value) {
+  const base = String(value || "").trim().replace(/\/+$/, "");
+  if (!base) return "";
+  // Accept either the Render origin or a full /api/v1 base URL, and avoid
+  // producing duplicate prefixes when Vercel variables differ by environment.
+  if (/\/api\/v1$/i.test(base)) return base;
+  return base + "/api/v1";
+}
+const API_BASE = normalizeApiBase(configuredApiBase || defaultApiBase);
 
 function readableError(detail, fallback) {
   if (typeof detail === "string") return detail;
