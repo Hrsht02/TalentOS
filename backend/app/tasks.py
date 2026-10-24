@@ -100,12 +100,17 @@ def match_candidates(self, job_id: str) -> dict[str, object]:
                 processed += 1
                 eligible_count += int(is_eligible)
             await db.commit()
-            try:
-                ranking_task = rank_job_applicants.delay(job_id)
-                ranking_task_id = ranking_task.id
-            except Exception as queue_error:
-                logger.warning("Ranking task could not be queued job_id=%s error_type=%s", job_id, type(queue_error).__name__)
+            if __import__("os").getenv("DISABLE_DB_POOL") == "1":
+                # GitHub scheduled-runner mode must not contact the Celery broker.
+                # The automation runner handles ranking directly after matching.
                 ranking_task_id = None
+            else:
+                try:
+                    ranking_task = rank_job_applicants.delay(job_id)
+                    ranking_task_id = ranking_task.id
+                except Exception as queue_error:
+                    logger.warning("Ranking task could not be queued job_id=%s error_type=%s", job_id, type(queue_error).__name__)
+                    ranking_task_id = None
             return {"status": "completed", "job_id": job_id, "candidates_processed": processed,
                     "eligible_candidates": eligible_count, "ranking_task_id": ranking_task_id}
     try:
