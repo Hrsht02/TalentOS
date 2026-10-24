@@ -16,8 +16,7 @@ def main() -> None:
     database_url = os.getenv("DATABASE_URL", "").strip()
     if not database_url or "localhost" in database_url or "127.0.0.1" in database_url:
         raise SystemExit("DATABASE_URL secret is missing or points to localhost. Add the Neon connection string as GitHub Actions secret NEON_DATABASE_URL.")
-    result = run_recruitment_automation.apply(throw=True)
-    payload = result.get()
+    payload = run_recruitment_automation.run()
     print("TALENTOS_AUTOMATION_RESULT=" + json.dumps(payload, sort_keys=True, default=str))
 
 
