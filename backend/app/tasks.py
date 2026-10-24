@@ -1,5 +1,6 @@
 """Background task entrypoints. Keep tasks idempotent and avoid logging user PII."""
 import logging
+import os
 from app.worker import celery_app
 
 logger = logging.getLogger(__name__)
@@ -100,7 +101,7 @@ def match_candidates(self, job_id: str) -> dict[str, object]:
                 processed += 1
                 eligible_count += int(is_eligible)
             await db.commit()
-            if __import__("os").getenv("DISABLE_DB_POOL") == "1":
+            if os.getenv("DISABLE_DB_POOL") == "1":
                 # GitHub scheduled-runner mode must not contact the Celery broker.
                 # The automation runner handles ranking directly after matching.
                 ranking_task_id = None
