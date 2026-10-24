@@ -42,7 +42,7 @@ Development defaults are provided for convenience only. Change `ADMIN_SEED_EMAIL
 ## Deployment
 
 - Configure Vercel with root directory `frontend`, build command `npm run build`, output directory `dist`.
-- Configure a Render Python web service with root directory `backend` and start command `uvicorn app.main:app --host 0.0.0.0 --port $PORT` once the API entrypoint is added.
+- Configure a Render Python web service with root directory `backend` and start command `uvicorn app.main:app --host 0.0.0.0 --port $PORT`.
 - Configure a separate Render worker service for Celery after queue tasks are added.
 - Set secrets using Render/Vercel environment settings. Never put API keys in source control.
 - Run Alembic migrations as an explicit release/deploy step. Back up PostgreSQL before production migrations.
@@ -90,7 +90,7 @@ AI produces recommendations and evidence-based explanations. It must not automat
 4. Start Command: `uvicorn app.main:app --host 0.0.0.0 --port $PORT`.
 5. Configure `DATABASE_URL`, `REDIS_URL`, `SECRET_KEY`, `FRONTEND_URL`, `CORS_ORIGINS`, and the provider API keys in Render's environment settings.
 6. Run `alembic upgrade head` from the backend directory as a one-off/release step, then run `python -m app.scripts.seed_admin` once using a strong, unique `ADMIN_SEED_PASSWORD`.
-7. Add a separate Render background worker with start command `celery -A app.worker.celery_app worker --loglevel=info` when using queued AI tasks.
+7. Add a separate Render background worker with start command `celery -A app.worker:celery_app worker --loglevel=info` when using queued AI tasks.
 
 Do not commit secrets. Before production, add email verification, refresh-token rotation, rate limiting, tenant-isolation tests, database backups, and monitoring. The repository is not yet production-ready.
 
