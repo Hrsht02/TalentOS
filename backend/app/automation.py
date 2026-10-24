@@ -6,6 +6,7 @@ and never finalizes a hiring decision.
 """
 import asyncio
 import logging
+import os
 from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import func, select
@@ -132,7 +133,13 @@ def run_recruitment_automation(self) -> dict[str, int]:
         logger.info("Recruitment automation pass complete counts=%s", counts)
         return counts
     except Exception as exc:
-        logger.warning("Recruitment automation pass failed error_type=%s", type(exc).__name__)
+        logger.exception("Recruitment automation pass failed")
+        if os.getenv("DISABLE_DB_POOL") == "1":
+            # Scheduled-runner mode should fail immediately with the real traceback.
+            raise
         raise self.retry(exc=exc)
     finally:
-        asyncio.run(engine.dispose())
+        try:
+            asyncio.run(engine.dispose())
+        except Exception:
+            logger.debug("engine.dispose() failed during cleanup", exc_info=True)
