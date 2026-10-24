@@ -123,12 +123,18 @@ def run_recruitment_automation(self) -> dict[str, int]:
         # Celery's apply() executes locally and does not contact the broker.
         from app.tasks import match_candidates, rank_job_applicants
         for job_id in dict.fromkeys(match_job_ids):
-            result = match_candidates.apply(args=[job_id], throw=True)
-            result.get()
+            if os.getenv("DISABLE_DB_POOL") == "1":
+                match_candidates.run(job_id)
+            else:
+                result = match_candidates.apply(args=[job_id], throw=True)
+                result.get()
             counts["matching_queued"] += 1
         for job_id in dict.fromkeys(rank_job_ids):
-            result = rank_job_applicants.apply(args=[job_id], throw=True)
-            result.get()
+            if os.getenv("DISABLE_DB_POOL") == "1":
+                rank_job_applicants.run(job_id)
+            else:
+                result = rank_job_applicants.apply(args=[job_id], throw=True)
+                result.get()
             counts["ranking_queued"] += 1
         logger.info("Recruitment automation pass complete counts=%s", counts)
         return counts
